@@ -56,8 +56,7 @@ Consequently, the theoretical optimum for a useful Quantum Neural Network is to 
 The vanishing gradient problem can be sistematically attacked from 3 different fronts:
 
 ## Topology / arquitechture
-This category groups all the options that change the Hilbert Space tha the circuit can explore. The objective of this solution is to prevent the system to reach the infamous 
-2-design circuit's properties, that basically mean that the variance of the parameters decay exponentially with the degree of the circuit, thus ending up with vanishing gradients
+This category groups all the options that change the Hilbert Space tha the circuit can explore. The objective of this solution is to prevent the system to reach the infamous 2-design circuit's properties, that basically mean that the variance of the parameters decay exponentially with the degree of the circuit, thus ending up with vanishing gradients. 
 
 ### Cost function (global vs local):
 
@@ -76,8 +75,7 @@ This group assumes that the arquitecture can have BPs, and thus tries to avoid t
 
 
 ## Training dynamic
-Thi category groups the strategies that modify the form in which the classical optimizer interacts with the circuit through time, assuming the arquitecture and the initialization
-are already established.
+Thi category groups the strategies that modify the form in which the classical optimizer interacts with the circuit through time, assuming the arquitecture and the initialization are already established.
 
 ### Layerwise Learning:
 
@@ -87,5 +85,6 @@ are already established.
 
 ### Changes on the optimizer:
 
+# My investigation
 
 # Bilbiography
