@@ -1,7 +1,7 @@
 # Steps to run the code
 
 - create a virtual environment:
-python3 -m venv .env
+python3 -m venv .venv
 
 - install the libraries:
 pip install -r requirements.txt
