@@ -22,7 +22,8 @@ Variational Quantum Algorithms are hybrid quantum-classical computational framew
 $$|\psi(\theta)\rangle = U(\theta)|0\rangle$$
 A classical optimizer is then tasked with updating the parameter vector $\theta$ to minimize a specific objective function $C(\theta)$, typically the expectation value of an observable $H$, such that:
 $$C(\theta) = \langle \psi(\theta)|H|\psi(\theta)\rangle$$
-The Variational Quantum Eigensolver (VQE) is a prominent subclass of VQAs. It leverages the variational principle of quantum mechanics to find the minimum eigenvalue (ground state energy) of a given Hamiltonian $H$. The protocol iteratively measures the energy of the parameterized state and adjusts $\theta$ via the classical control loop until convergence is reached.
+
+![ansatz](assets/imgs/ansatz.png)
 
 ### The Barren Plateau Phenomenon
 
@@ -38,8 +39,7 @@ $$P(|f(x) - \mathbb{E}[f]| \ge \epsilon) \le 2 \exp(-\mathcal{O}(D \epsilon^2))$
 ![Concentration of Measure](assets/imgs/concentration_of_measure.png)
 
 **Exponential Variance Decay (Vanishing Gradients)**
-When applying the concentration of measure to the optimization process, the continuous function $f(x)$ is the partial derivative of the cost function, $\partial_{\theta_i} C$. Consequently, the value of the gradient concentrates exponentially around its mean. Since the mathematical mean of the gradient over the parameter space is zero ($\mathbb{E}[\partial_{\theta_i} C] = 0$), the statistical variance of the gradient decays exponentially with the number of qubits:
-$$\text{Var}[\partial_{\theta_i} C] \in \mathcal{O}\left(\frac{1}{b^n}\right) | \text{  }b > 1 $$ This exponential decay is precisely the quantum vanishing gradient. Unlike classical neural networks, where vanishing gradients are caused by the chain rule in deep layers, the quantum vanishing gradient is a direct geometric consequence of the Hilbert space dimensionality.
+When applying the concentration of measure to the optimization process, the continuous function $f(x)$ is the partial derivative of the cost function, $\partial_{\theta_i} C$. Consequently, the value of the gradient concentrates exponentially around its mean. Since the mathematical mean of the gradient over the parameter space is zero ($\mathbb{E}[\partial_{\theta_i} C] = 0$), the statistical variance of the gradient decays exponentially with the number of qubits: $$\text{Var}[\partial_{\theta_i} C] \in \mathcal{O}\left(\frac{1}{b^n}\right) | \text{  }b > 1 $$ This exponential decay is precisely the quantum vanishing gradient. Unlike classical neural networks, where vanishing gradients are caused by the chain rule in deep layers, the quantum vanishing gradient is a direct geometric consequence of the Hilbert space dimensionality.
 
 **Intractability on Physical Hardware**
 The ultimate consequence of this exponential variance decay is the Barren Plateau. For a classical optimizer to determine a reliable descent direction, the variance of the gradient must stand out against the inherent statistical noise of quantum measurements (shot noise). To estimate a gradient with a variance of $\mathcal{O}(1/b^n)$ to a precision greater than the statistical noise, the number of hardware measurements (shots) required scales exponentially as $\mathcal{O}(b^n)$. This renders the optimization algorithm computationally intractable on physical hardware, paralyzing the training process at step zero.
@@ -107,7 +107,34 @@ When executing VQAs on physical hardware, the calculated gradients are not exact
 Changing the optimizer to stochastic-specific algorithms, such as Simultaneous Perturbation Stochastic Approximation (SPSA) or its quantum geometric variant (QNSPSA), mathematically accounts for this noise. These optimizers evaluate the objective function using random perturbation vectors across all parameters simultaneously. This approach inherently averages out the statistical noise and maintains an operationally valid descent trajectory, even when the underlying gradient variance is highly suppressed by the hardware limitations.
 
 # My investigation
+
+## Comparison on Normal vs Enhanced circuits for BP mitigation
+Before comparing the optimizers, i wanted to do a couple of tests of normal circuits vs circuits created with the mitigation of BPs in mind. 
+
+### Initialization comparison
+I designed this experiment as an initialization-level comparison, not as a full training run. For each qubit count $(n \in {2,4,6,8,10,12,14})$, I instantiate two circuit regimes: a worst-case setup with full entanglement, fixed depth (L=3), and a global cost $(Z^{\otimes n})$, and a mitigated setup with linear entanglement, depth $(L \approx \log_2(n))$, and a local cost on a single qubit.
+
+For each regime and each (n), I run a Monte Carlo test at (t=0): I sample 150 random parameter vectors, estimate one gradient component $(\partial_{\theta_0}C)$ using the parameter-shift rule, and compute its variance. In the worst-case branch I initialize parameters uniformly in $([-\pi,\pi])$, while in the mitigated branch I use a narrow Gaussian centered at 0 to stay near identity initialization. I then compare how the gradient variance scales with (n) to evaluate how quickly gradients vanish in each regime.
+
+![thopo-ini-miti](assets/imgs/thopo-ini-miti.png)
+
+The figure shows a clear result. The circuit in red followed an exponential decay (the column axis is logarithmical) while the circuit in red shows that for the first iteration, the chosen BP mitigation approaches worked nicely, not showing any decay with the increase in qubits.
+
+###  8-qubit training comparison
+In the next experiment, I move from the initialization-only test to a short optimization dynamics test at fixed size $(n=8)$. I keep the same two circuit families to make the comparison consistent.
+
+I then train both models with the same Gradient Descent loop using exact parameter-shift gradients for all parameters at each iteration. I use identical optimization settings for both branches (learning rate $0.5$, maximum $60$ iterations, early stopping tolerance $10^{-4}$), and I track two temporal metrics: the cost trajectory $C(\theta_t)$ and the gradient norm $\|\nabla C\|_2$. This lets me compare not only where each model converges, but also how stable and informative the gradient signal remains during training.
+
+![training](assets/imgs/training.png)
+
+We can see that for the optimized circuit, thanks to the initialization, the algorithm converges much faster and smoother, in comparison whith the non-optimized one. We can also see on the right figure, on the red curve, that the gradient almost falls to 0 before converging, almost reaching a 2-design.
+
+
 ## COBYLA vs QNSPSA
+
+
+
+### Results analysis
 
 # Notes
 
