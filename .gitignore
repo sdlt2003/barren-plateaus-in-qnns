@@ -24,7 +24,7 @@ Thumbs.db
 
 # Results
 results/
-
+cluster_outputs/outputs
 # Logs
 *.log
 
