@@ -1,0 +1,22 @@
+# Ignora todo por defecto
+*
+
+# Permite carpetas necesarias
+!src/
+!src/**
+
+!docs/
+!docs/**
+
+!helpers/
+!helpers/**
+
+!outputs/
+!outputs/**
+
+# Excluir logs dentro de outputs
+outputs/logs/
+outputs/logs/**
+
+# Mantener .gitignore versionado
+!.gitignore

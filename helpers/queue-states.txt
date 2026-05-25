@@ -1,0 +1,12 @@
+PD = pendiente, todavía está en la cola
+R = ejecutándose
+CF = configurándose
+CG = terminando
+CD = completado
+CA = cancelado
+F = fallido
+TO = timeout
+NF = fallo de nodo
+PR = preempted
+S = suspendido
+OOM = se quedó sin memoria
