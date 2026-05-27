@@ -17,6 +17,15 @@
 # Excluir logs dentro de outputs
 outputs/logs/
 outputs/logs/**
+outputs/.runmeta/
+outputs/.runmeta/**
+outputs/_smoke*/
+outputs/_smoke*/**
+
+# Excluir caches de Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
 
 # Mantener .gitignore versionado
 !.gitignore

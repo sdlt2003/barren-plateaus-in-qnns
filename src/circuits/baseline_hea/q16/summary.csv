@@ -1,0 +1,2 @@
+architecture,n_qubits,num_params,depth,size,readout_qubit,png_generated,text_diagram,png_diagram
+baseline_hea,16,160,31,220,15,yes,baseline_hea/q16/diagram.txt,baseline_hea/q16/diagram.png

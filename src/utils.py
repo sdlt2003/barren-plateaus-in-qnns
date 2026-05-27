@@ -298,25 +298,48 @@ def run_optimizer(name: str, optimizer, objective: Callable, x0, *, counts: dict
 
 
 def save_optimizer_time_series(history: dict, outdir: str, *, filename: str = "optimizer_compare.png") -> None:
-    """Save a time-series plot of optimizer evals vs cost for given history dict.
+    """Save time-series plots for optimizer progress.
 
     Expects `history` to be a dict with keys like 'cobyla' and 'qnspsa', each containing
     {'evals': [...], 'cost': [...]}.
+
+    Outputs:
+    - `<filename>`: cost vs optimizer iteration (more comparable across optimizers)
+    - `<filename_stem>_budget<ext>`: cost vs global budget/eval count (legacy view)
     """
     os.makedirs(outdir, exist_ok=True)
-    plt.figure(figsize=(8, 5))
-    if "cobyla" in history:
-        plt.plot(history["cobyla"]["evals"], history["cobyla"]["cost"], label="COBYLA", color="blue")
-    if "qnspsa" in history:
-        plt.plot(history["qnspsa"]["evals"], history["qnspsa"]["cost"], label="QNSPSA", color="green")
-    plt.axhline(y=-1.0, color="r", linestyle="--", label="theoretical min -1")
-    plt.xlabel("Eval count")
-    plt.ylabel("Cost")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(outdir, filename))
-    plt.close()
+
+    stem, ext = os.path.splitext(filename)
+    if not ext:
+        ext = ".png"
+    iteration_filename = f"{stem}{ext}"
+    budget_filename = f"{stem}_budget{ext}"
+
+    def _plot(x_key: str, x_label: str, out_filename: str) -> None:
+        plt.figure(figsize=(8, 5))
+        if "cobyla" in history:
+            if x_key == "iteration":
+                x_vals = list(range(1, len(history["cobyla"]["cost"]) + 1))
+            else:
+                x_vals = history["cobyla"]["evals"]
+            plt.plot(x_vals, history["cobyla"]["cost"], label="COBYLA", color="blue")
+        if "qnspsa" in history:
+            if x_key == "iteration":
+                x_vals = list(range(1, len(history["qnspsa"]["cost"]) + 1))
+            else:
+                x_vals = history["qnspsa"]["evals"]
+            plt.plot(x_vals, history["qnspsa"]["cost"], label="QNSPSA", color="green")
+        plt.axhline(y=-1.0, color="r", linestyle="--", label="theoretical min -1")
+        plt.xlabel(x_label)
+        plt.ylabel("Cost")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(outdir, out_filename))
+        plt.close()
+
+    _plot("iteration", "Optimizer iteration", iteration_filename)
+    _plot("budget", "Eval count", budget_filename)
 
 
 def save_final_cost_boxplot(rows: list, agg: dict, outdir: str, *, filename: str = "final_cost_vs_qubits.png") -> None:

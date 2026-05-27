@@ -1,0 +1,2 @@
+architecture,n_qubits,num_params,depth,size,readout_qubit,png_generated,text_diagram,png_diagram
+qcnn,16,108,44,190,15,yes,qcnn/q16/diagram.txt,qcnn/q16/diagram.png

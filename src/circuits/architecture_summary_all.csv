@@ -1,0 +1,9 @@
+architecture,n_qubits,num_params,depth,size,readout_qubit,png_generated,text_diagram,png_diagram
+baseline_hea,4,24,11,30,3,yes,baseline_hea/q4/diagram.txt,baseline_hea/q4/diagram.png
+baseline_hea,8,64,19,85,7,yes,baseline_hea/q8/diagram.txt,baseline_hea/q8/diagram.png
+baseline_hea,12,120,27,164,11,yes,baseline_hea/q12/diagram.txt,baseline_hea/q12/diagram.png
+baseline_hea,16,160,31,220,15,yes,baseline_hea/q16/diagram.txt,baseline_hea/q16/diagram.png
+baseline_hea,20,200,35,276,19,yes,baseline_hea/q20/diagram.txt,baseline_hea/q20/diagram.png
+qcnn,4,18,20,32,3,yes,qcnn/q4/diagram.txt,qcnn/q4/diagram.png
+qcnn,8,47,32,83,7,yes,qcnn/q8/diagram.txt,qcnn/q8/diagram.png
+qcnn,16,108,44,190,15,yes,qcnn/q16/diagram.txt,qcnn/q16/diagram.png
