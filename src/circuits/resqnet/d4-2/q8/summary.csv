@@ -1,0 +1,2 @@
+architecture,n_qubits,num_params,depth,size,readout_qubit,resqnet_depth_split,resqnet_residual_mode,png_generated,text_diagram,png_diagram
+resqnet,8,112,52,184,7,"4,2",structural,yes,resqnet/d4-2/q8/diagram.txt,resqnet/d4-2/q8/diagram.png

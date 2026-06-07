@@ -25,7 +25,7 @@ from hyperparams import (  # noqa: E402
     SIM_MAX_BUDGET_EVALS as MAX_BUDGET_EVALS,
     MIN_BUDGET_EVALS,
 )
-from phase2.architectures import available_architectures, build_architecture  # noqa: E402
+from phase2.architectures import available_architectures, build_architecture, parse_depth_split  # noqa: E402
 from utils import (  # noqa: E402
     ConvergenceReached,
     init_trackers,
@@ -67,11 +67,18 @@ def optimizer_compare(
     tol: float = EARLY_STOPPING_TOLERANCE,
     target_precision: float = DEFAULT_TARGET_PRECISION,
     architecture: str = "baseline_hea",
+    resqnet_depth_split: tuple[int, int] = (5, 1),
+    resqnet_residual_mode: str = "structural",
 ) -> None:
     if seed is not None:
         np.random.seed(seed)
 
-    arch = build_architecture(architecture=architecture, n_qubits=n_qubits)
+    arch = build_architecture(
+        architecture=architecture,
+        n_qubits=n_qubits,
+        resqnet_depth_split=resqnet_depth_split,
+        resqnet_residual_mode=resqnet_residual_mode,
+    )
     ansatz = arch.circuit
     observable = SparsePauliOp.from_list([("I" * arch.readout_qubit + "Z" + "I" * (n_qubits - arch.readout_qubit - 1), 1.0)])
     num_params = ansatz.num_parameters
@@ -162,6 +169,18 @@ def main() -> None:
         help="Circuit architecture to benchmark",
     )
     parser.add_argument(
+        "--resqnet-depth-split",
+        type=str,
+        default="5,1",
+        help="Depth split for resqnet as 'D1,D2' (e.g. '5,1'). Ignored for other architectures.",
+    )
+    parser.add_argument(
+        "--resqnet-residual-mode",
+        type=str,
+        default="structural",
+        help="Residual mode for resqnet. Current supported value: structural.",
+    )
+    parser.add_argument(
         "--budget-evals",
         type=int,
         default=None,
@@ -189,6 +208,8 @@ def main() -> None:
         outdir=args.outdir,
         seed=args.seed,
         architecture=args.architecture,
+        resqnet_depth_split=parse_depth_split(args.resqnet_depth_split),
+        resqnet_residual_mode=args.resqnet_residual_mode,
         budget_evals=args.budget_evals,
         budget_k=args.budget_k,
         window=args.window,

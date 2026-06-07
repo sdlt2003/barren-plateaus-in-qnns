@@ -7,7 +7,7 @@ import csv
 import itertools
 from pathlib import Path
 
-from phase2.architectures import available_architectures, build_architecture
+from phase2.architectures import available_architectures, build_architecture, parse_depth_split
 
 
 def _is_power_of_two(value: int) -> bool:
@@ -47,6 +47,20 @@ def _architecture_notes(architecture: str, metadata: dict) -> str:
             f"- Levels: {levels} (log2 hierarchy)"
         )
 
+    if architecture == "resqnet":
+        depth_split = metadata.get("depth_split", ["?", "?"])
+        residual_mode = metadata.get("residual_mode", "structural")
+        shared_reupload = metadata.get("shared_reupload", False)
+        layer_design = metadata.get("layer_design", "rx-ry + linear_cnot")
+        return (
+            "Blocks:\n"
+            "- Two-node residual quantum network\n"
+            f"- Depth split (D1,D2): {depth_split[0]},{depth_split[1]}\n"
+            f"- Residual mode: {residual_mode}\n"
+            f"- Shared re-upload: {shared_reupload}\n"
+            f"- Layer design: {layer_design}"
+        )
+
     return "Blocks:\n- Custom architecture"
 
 
@@ -77,11 +91,27 @@ def _write_mpl_diagram(path: Path, circuit, *, architecture: str, summary: dict,
         return False
 
 
-def _render_one(architecture: str, n_qubits: int, output_dir: Path) -> dict[str, int | str]:
-    spec = build_architecture(architecture=architecture, n_qubits=n_qubits)
+def _render_one(
+    architecture: str,
+    n_qubits: int,
+    output_dir: Path,
+    *,
+    resqnet_depth_split: tuple[int, int] = (5, 1),
+    resqnet_residual_mode: str = "structural",
+) -> dict[str, int | str]:
+    spec = build_architecture(
+        architecture=architecture,
+        n_qubits=n_qubits,
+        resqnet_depth_split=resqnet_depth_split,
+        resqnet_residual_mode=resqnet_residual_mode,
+    )
     circuit = spec.circuit
 
-    run_dir = output_dir / architecture / f"q{n_qubits}"
+    if architecture == "resqnet":
+        split_label = f"d{resqnet_depth_split[0]}-{resqnet_depth_split[1]}"
+        run_dir = output_dir / architecture / split_label / f"q{n_qubits}"
+    else:
+        run_dir = output_dir / architecture / f"q{n_qubits}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     text_path = run_dir / "diagram.txt"
@@ -107,6 +137,8 @@ def _render_one(architecture: str, n_qubits: int, output_dir: Path) -> dict[str,
 
     row = {
         **summary,
+        "resqnet_depth_split": ",".join(map(str, spec.metadata.get("depth_split", []))),
+        "resqnet_residual_mode": str(spec.metadata.get("residual_mode", "")),
         "png_generated": "yes" if png_ok else "no",
         "text_diagram": str(text_path.relative_to(output_dir)),
         "png_diagram": str(png_path.relative_to(output_dir)) if png_ok else "",
@@ -118,14 +150,27 @@ def _render_one(architecture: str, n_qubits: int, output_dir: Path) -> dict[str,
         writer.writeheader()
         writer.writerow(row)
 
+    extra = ""
+    if architecture == "resqnet":
+        extra = (
+            f" depth_split={resqnet_depth_split[0]},{resqnet_depth_split[1]}"
+            f" residual_mode={resqnet_residual_mode}"
+        )
     print(
         f"[{architecture}] q={n_qubits} params={spec.num_parameters} depth={circuit.depth()} "
-        f"readout={spec.readout_qubit} dir={run_dir}"
+        f"readout={spec.readout_qubit}{extra} dir={run_dir}"
     )
     return row
 
 
-def visualize(architectures: list[str], qubit_values: list[int], output_dir: Path) -> None:
+def visualize(
+    architectures: list[str],
+    qubit_values: list[int],
+    output_dir: Path,
+    *,
+    resqnet_depth_splits: list[tuple[int, int]],
+    resqnet_residual_mode: str,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_rows: list[dict[str, int | str]] = []
 
@@ -136,7 +181,19 @@ def visualize(architectures: list[str], qubit_values: list[int], output_dir: Pat
                 f"got n_qubits={n_qubits}"
             )
             continue
-        summary_rows.append(_render_one(architecture=architecture, n_qubits=n_qubits, output_dir=output_dir))
+        if architecture == "resqnet":
+            for depth_split in resqnet_depth_splits:
+                summary_rows.append(
+                    _render_one(
+                        architecture=architecture,
+                        n_qubits=n_qubits,
+                        output_dir=output_dir,
+                        resqnet_depth_split=depth_split,
+                        resqnet_residual_mode=resqnet_residual_mode,
+                    )
+                )
+        else:
+            summary_rows.append(_render_one(architecture=architecture, n_qubits=n_qubits, output_dir=output_dir))
 
     summary_path = output_dir / "architecture_summary_all.csv"
     with summary_path.open("w", encoding="utf-8", newline="") as handle:
@@ -149,6 +206,8 @@ def visualize(architectures: list[str], qubit_values: list[int], output_dir: Pat
                 "depth",
                 "size",
                 "readout_qubit",
+                "resqnet_depth_split",
+                "resqnet_residual_mode",
                 "png_generated",
                 "text_diagram",
                 "png_diagram",
@@ -187,15 +246,33 @@ def main() -> None:
         default=Path("src/circuits"),
         help="Directory where diagrams and summary are written",
     )
+    parser.add_argument(
+        "--resqnet-depth-splits",
+        nargs="+",
+        default=["5,1"],
+        help=(
+            "One or more depth splits for resqnet in D1,D2 format. "
+            "Example: --resqnet-depth-splits 5,1 4,2 3,3"
+        ),
+    )
+    parser.add_argument(
+        "--resqnet-residual-mode",
+        type=str,
+        default="structural",
+        help="Residual mode for resqnet (current supported value: structural)",
+    )
     args = parser.parse_args()
 
     architectures = list(available_architectures()) if args.all_combinations else args.architectures
     qubit_values = args.qubits if args.qubits else [args.n_qubits]
+    resqnet_depth_splits = [parse_depth_split(raw) for raw in args.resqnet_depth_splits]
 
     visualize(
         architectures=architectures,
         qubit_values=qubit_values,
         output_dir=args.output_dir,
+        resqnet_depth_splits=resqnet_depth_splits,
+        resqnet_residual_mode=args.resqnet_residual_mode,
     )
 
 

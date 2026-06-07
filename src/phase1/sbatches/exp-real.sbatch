@@ -4,15 +4,19 @@
 #SBATCH --error=outputs/logs/real_hw_M_%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=2G
-#SBATCH --partition=CPU
-#SBATCH --array=1-25
+#SBATCH --partition=CPU-LARGE
+#SBATCH --time=7-00:00:00
+#SBATCH --array=1-25%2
 
 # Fail the job if any command fails.
 set -euo pipefail
 
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
 
-RUN_LABEL="multijob-real-hw"
+BACKEND="${BACKEND:-ibm_basquecountry}"
+RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-120}"
+
+RUN_LABEL="phase1_baseline-real-hw"
 RUN_META_DIR="outputs/.runmeta/${SLURM_ARRAY_JOB_ID}"
 mkdir -p "$RUN_META_DIR"
 
@@ -57,6 +61,8 @@ echo "Running real-hw seed=$SEED, n_qubits=$Q (array task $SLURM_ARRAY_TASK_ID)"
 echo "Slurm job name: $TASK_JOB_NAME"
 echo "Run root: $RUN_ROOT"
 echo "Budget evals: $BUDGET_EVALS"
+echo "Backend: $BACKEND"
+echo "Runtime result timeout: $RUNTIME_RESULT_TIMEOUT"
 
 bnd run --cpu python src/phase1/exp-real.py \
 	--n_qubits $Q \
@@ -65,6 +71,8 @@ bnd run --cpu python src/phase1/exp-real.py \
 	--shots 1024 \
 	--window 10 \
 	--tolerance 1e-3 \
+	--backend "$BACKEND" \
+	--runtime-result-timeout "$RUNTIME_RESULT_TIMEOUT" \
 	--outdir "$RUN_DIR"
 
 echo "Completed: seed=$SEED, n_qubits=$Q"

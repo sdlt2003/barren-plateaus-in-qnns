@@ -1,0 +1,7 @@
+{
+  "array_job_id": "1205571",
+  "scenario": "shot_noise",
+  "architecture": "resqnet",
+  "run_root": "outputs/20260602-224948_phase2_resqnet-shot-noise",
+  "completed_at": "2026-06-02T23:00:34+02:00"
+}

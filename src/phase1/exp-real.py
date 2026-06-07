@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -48,6 +49,7 @@ from utils import (
     run_optimizer,
     save_optimizer_time_series,
     resolve_budget_evals,
+    resolve_runtime_outdir,
 )
 
 
@@ -123,7 +125,9 @@ def optimizer_compare(
     channel: str,
     optimization_level: int | None,
     resilience_level: int | None,
+    runtime_result_timeout: float,
 ):
+    outdir = resolve_runtime_outdir(outdir)
     if seed is not None:
         np.random.seed(seed)
 
@@ -135,13 +139,16 @@ def optimizer_compare(
     token = get_env_first("QISKIT_IBM_TOKEN", "API_KEY")
     instance = get_env_first("QISKIT_IBM_INSTANCE", "CRN_KEY")
     
-    # Create service directly (tries both channels if needed)
+    print("Runtime preflight: creating IBM Runtime service...")
     service = build_runtime_service(channel=channel, token=token, instance=instance)
+    print("Runtime preflight: selecting backend...")
     backend = select_backend(service, backend_name, n_qubits)
+    print(f"Runtime preflight: selected backend={backend.name}")
 
     # Runtime requires ISA circuits. Transpile ansatz to the backend target and
     # apply the resulting layout to the observable.
     opt_level = 1 if optimization_level is None else optimization_level
+    print(f"Transpilation: optimization_level={opt_level}")
     pm = generate_preset_pass_manager(backend=backend, optimization_level=opt_level)
     ansatz = pm.run(ansatz_logical)
     observable = observable_logical.apply_layout(ansatz.layout)
@@ -173,78 +180,98 @@ def optimizer_compare(
 
     history, counts = init_trackers("cobyla", "qnspsa")
 
-    with Session(backend=backend) as session:
-        estimator = RuntimeEstimator(mode=session, options=options)
+    run_status = {
+        "status": "failed",
+        "backend": backend.name,
+        "runtime_result_timeout_s": runtime_result_timeout,
+        "error": None,
+    }
+    try:
+        print("Runtime execution: opening session...")
+        with Session(backend=backend) as session:
+            estimator = RuntimeEstimator(mode=session, options=options)
+            print("Runtime execution: estimator initialized.")
 
-        objective_cobyla = with_early_stopping(
-            make_objective(
+            objective_cobyla = with_early_stopping(
+                make_objective(
+                    "cobyla",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="cobyla",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+            objective_qnspsa = with_early_stopping(
+                make_objective(
+                    "qnspsa",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="qnspsa",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+
+            # QNSPSA needs a fidelity function. Keep this on the logical ansatz to
+            # avoid huge statevectors from backend ISA layouts.
+            fidelity = make_fidelity(
+                counts=counts,
+                key="qnspsa",
+                circuit=ansatz_logical,
+                budget_evals=resolved_budget_evals,
+            )
+
+            print(f"Backend: {backend.name}")
+            print(
+                f"Fidelity circuit qubits: logical={ansatz_logical.num_qubits}, "
+                f"isa={ansatz.num_qubits}"
+            )
+            print(f"Running COBYLA on hardware ({shots} shots)...")
+            run_optimizer(
                 "cobyla",
+                COBYLA(maxiter=resolved_budget_evals),
+                objective_cobyla,
+                initial_parameters,
                 counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-            ),
-            history=history,
-            key="cobyla",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-        objective_qnspsa = with_early_stopping(
-            make_objective(
+            )
+
+            print(f"Running QNSPSA on hardware ({shots} shots)...")
+            run_optimizer(
                 "qnspsa",
+                QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
+                objective_qnspsa,
+                initial_parameters,
                 counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-            ),
-            history=history,
-            key="qnspsa",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-
-        # QNSPSA needs a fidelity function. Keep this on the logical ansatz to
-        # avoid huge statevectors from backend ISA layouts.
-        fidelity = make_fidelity(
-            counts=counts,
-            key="qnspsa",
-            circuit=ansatz_logical,
-            budget_evals=resolved_budget_evals,
-        )
-
-        print(f"Backend: {backend.name}")
-        print(
-            f"Fidelity circuit qubits: logical={ansatz_logical.num_qubits}, "
-            f"isa={ansatz.num_qubits}"
-        )
-        print(f"Running COBYLA on hardware ({shots} shots)...")
-        run_optimizer(
-            "cobyla",
-            COBYLA(maxiter=resolved_budget_evals),
-            objective_cobyla,
-            initial_parameters,
-            counts=counts,
-        )
-
-        print(f"Running QNSPSA on hardware ({shots} shots)...")
-        run_optimizer(
-            "qnspsa",
-            QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
-            objective_qnspsa,
-            initial_parameters,
-            counts=counts,
-        )
-
-    os.makedirs(outdir, exist_ok=True)
-    np.savez(os.path.join(outdir, "optimizer_history.npz"), history=history)
-    save_optimizer_time_series(history, outdir)
-    print("Saved optimizer results to", outdir)
+            )
+        run_status["status"] = "completed"
+    except Exception as exc:
+        run_status["status"] = "failed_runtime"
+        run_status["error"] = repr(exc)
+        print(f"Runtime execution failed: {exc!r}")
+        raise
+    finally:
+        os.makedirs(outdir, exist_ok=True)
+        np.savez(os.path.join(outdir, "optimizer_history.npz"), history=history)
+        if history["cobyla"]["cost"] or history["qnspsa"]["cost"]:
+            save_optimizer_time_series(history, outdir)
+        with open(os.path.join(outdir, "run_status.json"), "w", encoding="utf-8") as handle:
+            json.dump(run_status, handle, indent=2, sort_keys=True)
+        print("Saved optimizer results to", outdir)
 
 
 def main() -> None:
@@ -271,6 +298,12 @@ def main() -> None:
     p.add_argument("--channel", type=str, default=os.environ.get("QISKIT_IBM_CHANNEL", "ibm_quantum"))
     p.add_argument("--optimization-level", type=int, default=None, help="Transpilation optimization level")
     p.add_argument("--resilience-level", type=int, default=None, help="Runtime resilience level")
+    p.add_argument(
+        "--runtime-result-timeout",
+        type=float,
+        default=120.0,
+        help="Maximum seconds to wait for each Estimator result() call before raising timeout.",
+    )
     args = p.parse_args()
 
     t0 = time.time()
@@ -287,6 +320,7 @@ def main() -> None:
         channel=args.channel,
         optimization_level=args.optimization_level,
         resilience_level=args.resilience_level,
+        runtime_result_timeout=args.runtime_result_timeout,
     )
     print("Total runtime:", time.time() - t0)
 

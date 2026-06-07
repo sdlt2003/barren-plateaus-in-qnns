@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=CPU
+#SBATCH --time=0
 #SBATCH --array=1-25
 
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
@@ -13,6 +14,7 @@ ARCHITECTURE="${ARCHITECTURE:-baseline_hea}"
 case "$ARCHITECTURE" in
 	baseline_hea) ARCH_LABEL="baseline" ;;
 	qcnn) ARCH_LABEL="qcnn" ;;
+	resqnet) ARCH_LABEL="resqnet" ;;
 	*) ARCH_LABEL="$ARCHITECTURE" ;;
 esac
 RUN_LABEL="phase2_${ARCH_LABEL}-shot-noise"
@@ -30,7 +32,7 @@ RUN_ROOT="outputs/$(<"$RUN_META_DIR/run_name.txt")"
 mkdir -p "$RUN_ROOT"
 
 SEEDS=(10 20 30 40 50)  # 5 semillas
-if [[ "$ARCHITECTURE" == "qcnn" ]]; then
+if [[ "$ARCHITECTURE" == "qcnn" || "$ARCHITECTURE" == "resqnet" ]]; then
 	QUBITS=(4 8 16)      # Solo potencias de 2 en el rango original
 else
 	QUBITS=(4 8 12 16 20)

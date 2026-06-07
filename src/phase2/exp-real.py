@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -29,13 +30,14 @@ from hyperparams import (  # noqa: E402
     REAL_HW_EARLY_STOPPING_WINDOW as EARLY_STOPPING_WINDOW,
     REAL_HW_MAX_BUDGET_EVALS as MAX_BUDGET_EVALS,
 )
-from phase2.architectures import available_architectures, build_architecture  # noqa: E402
+from phase2.architectures import available_architectures, build_architecture, parse_depth_split  # noqa: E402
 from utils import (  # noqa: E402
     ConvergenceReached,
     init_trackers,
     make_fidelity,
     make_objective,
     resolve_budget_evals,
+    resolve_runtime_outdir,
     run_optimizer,
     save_optimizer_time_series,
     with_early_stopping,
@@ -107,12 +109,21 @@ def optimizer_compare(
     channel: str,
     optimization_level: int | None,
     resilience_level: int | None,
+    runtime_result_timeout: float,
     architecture: str,
+    resqnet_depth_split: tuple[int, int],
+    resqnet_residual_mode: str,
 ) -> None:
+    outdir = resolve_runtime_outdir(outdir)
     if seed is not None:
         np.random.seed(seed)
 
-    arch = build_architecture(architecture=architecture, n_qubits=n_qubits)
+    arch = build_architecture(
+        architecture=architecture,
+        n_qubits=n_qubits,
+        resqnet_depth_split=resqnet_depth_split,
+        resqnet_residual_mode=resqnet_residual_mode,
+    )
     ansatz_logical = arch.circuit
     observable_logical = SparsePauliOp.from_list(
         [("I" * arch.readout_qubit + "Z" + "I" * (n_qubits - arch.readout_qubit - 1), 1.0)]
@@ -124,10 +135,14 @@ def optimizer_compare(
     if not token:
         raise RuntimeError("Missing IBM token. Set QISKIT_IBM_TOKEN or API_KEY in .env/environment.")
 
+    print("Runtime preflight: creating IBM Runtime service...")
     service = build_runtime_service(channel=channel, token=token, instance=instance)
+    print("Runtime preflight: selecting backend...")
     backend = select_backend(service, backend_name, n_qubits)
+    print(f"Runtime preflight: selected backend={backend.name}")
 
     opt_level = 1 if optimization_level is None else optimization_level
+    print(f"Transpilation: optimization_level={opt_level}")
     pm = generate_preset_pass_manager(backend=backend, optimization_level=opt_level)
     ansatz = pm.run(ansatz_logical)
     observable = observable_logical.apply_layout(ansatz.layout)
@@ -157,68 +172,89 @@ def optimizer_compare(
     options = configure_options(shots=shots, resilience_level=resilience_level)
     history, counts = init_trackers("cobyla", "qnspsa")
 
-    with Session(backend=backend) as session:
-        estimator = RuntimeEstimator(mode=session, options=options)
-        objective_cobyla = with_early_stopping(
-            make_objective(
+    run_status = {
+        "status": "failed",
+        "backend": backend.name,
+        "architecture": architecture,
+        "runtime_result_timeout_s": runtime_result_timeout,
+        "error": None,
+    }
+    try:
+        print("Runtime execution: opening session...")
+        with Session(backend=backend) as session:
+            estimator = RuntimeEstimator(mode=session, options=options)
+            print("Runtime execution: estimator initialized.")
+            objective_cobyla = with_early_stopping(
+                make_objective(
+                    "cobyla",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="cobyla",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+            objective_qnspsa = with_early_stopping(
+                make_objective(
+                    "qnspsa",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="qnspsa",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+
+            fidelity = make_fidelity(
+                counts=counts,
+                key="qnspsa",
+                circuit=ansatz_logical,
+                budget_evals=resolved_budget_evals,
+            )
+
+            print(f"Backend: {backend.name} | Architecture: {architecture}")
+            run_optimizer(
                 "cobyla",
+                COBYLA(maxiter=resolved_budget_evals),
+                objective_cobyla,
+                initial_parameters,
                 counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-            ),
-            history=history,
-            key="cobyla",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-        objective_qnspsa = with_early_stopping(
-            make_objective(
+            )
+            run_optimizer(
                 "qnspsa",
+                QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
+                objective_qnspsa,
+                initial_parameters,
                 counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-            ),
-            history=history,
-            key="qnspsa",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-
-        fidelity = make_fidelity(
-            counts=counts,
-            key="qnspsa",
-            circuit=ansatz_logical,
-            budget_evals=resolved_budget_evals,
-        )
-
-        print(f"Backend: {backend.name} | Architecture: {architecture}")
-        run_optimizer(
-            "cobyla",
-            COBYLA(maxiter=resolved_budget_evals),
-            objective_cobyla,
-            initial_parameters,
-            counts=counts,
-        )
-        run_optimizer(
-            "qnspsa",
-            QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
-            objective_qnspsa,
-            initial_parameters,
-            counts=counts,
-        )
-
-    os.makedirs(outdir, exist_ok=True)
-    np.savez(os.path.join(outdir, "optimizer_history.npz"), history=history)
-    save_optimizer_time_series(history, outdir)
-    print("Saved optimizer results to", outdir)
+            )
+        run_status["status"] = "completed"
+    except Exception as exc:
+        run_status["status"] = "failed_runtime"
+        run_status["error"] = repr(exc)
+        print(f"Runtime execution failed: {exc!r}")
+        raise
+    finally:
+        os.makedirs(outdir, exist_ok=True)
+        np.savez(os.path.join(outdir, "optimizer_history.npz"), history=history)
+        if history["cobyla"]["cost"] or history["qnspsa"]["cost"]:
+            save_optimizer_time_series(history, outdir)
+        with open(os.path.join(outdir, "run_status.json"), "w", encoding="utf-8") as handle:
+            json.dump(run_status, handle, indent=2, sort_keys=True)
+        print("Saved optimizer results to", outdir)
 
 
 def main() -> None:
@@ -232,6 +268,18 @@ def main() -> None:
         default="baseline_hea",
         choices=available_architectures(),
         help="Circuit architecture to benchmark",
+    )
+    parser.add_argument(
+        "--resqnet-depth-split",
+        type=str,
+        default="5,1",
+        help="Depth split for resqnet as 'D1,D2' (e.g. '5,1'). Ignored for other architectures.",
+    )
+    parser.add_argument(
+        "--resqnet-residual-mode",
+        type=str,
+        default="structural",
+        help="Residual mode for resqnet. Current supported value: structural.",
     )
     parser.add_argument(
         "--budget-evals",
@@ -252,6 +300,12 @@ def main() -> None:
     parser.add_argument("--channel", type=str, default=os.environ.get("QISKIT_IBM_CHANNEL", "ibm_quantum"))
     parser.add_argument("--optimization-level", type=int, default=None, help="Transpilation optimization level")
     parser.add_argument("--resilience-level", type=int, default=None, help="Runtime resilience level")
+    parser.add_argument(
+        "--runtime-result-timeout",
+        type=float,
+        default=120.0,
+        help="Maximum seconds to wait for each Estimator result() call before raising timeout.",
+    )
     args = parser.parse_args()
 
     t0 = time.time()
@@ -260,6 +314,8 @@ def main() -> None:
         outdir=args.outdir,
         seed=args.seed,
         architecture=args.architecture,
+        resqnet_depth_split=parse_depth_split(args.resqnet_depth_split),
+        resqnet_residual_mode=args.resqnet_residual_mode,
         budget_evals=args.budget_evals,
         budget_k=args.budget_k,
         window=args.window,
@@ -269,6 +325,7 @@ def main() -> None:
         channel=args.channel,
         optimization_level=args.optimization_level,
         resilience_level=args.resilience_level,
+        runtime_result_timeout=args.runtime_result_timeout,
     )
     print("Total runtime:", time.time() - t0)
 

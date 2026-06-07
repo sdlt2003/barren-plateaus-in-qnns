@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=CPU
+#SBATCH --time=0
 #SBATCH --array=1-25
 
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns

@@ -14,6 +14,7 @@ from qiskit.circuit.library import efficient_su2
 
 BASELINE_HEA = "baseline_hea"
 QCNN = "qcnn"
+RESQNET = "resqnet"
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,21 @@ class ArchitectureSpec:
 
 
 def available_architectures() -> tuple[str, ...]:
-    return (BASELINE_HEA, QCNN)
+    return (BASELINE_HEA, QCNN, RESQNET)
+
+
+def parse_depth_split(raw: str) -> tuple[int, int]:
+    """Parse depth split like '5,1' into a validated tuple."""
+    parts = [chunk.strip() for chunk in raw.split(",")]
+    if len(parts) != 2:
+        raise ValueError(f"Depth split must have 2 integers like '5,1' (got: {raw!r})")
+    try:
+        left, right = int(parts[0]), int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"Depth split values must be integers (got: {raw!r})") from exc
+    if left <= 0 or right <= 0:
+        raise ValueError(f"Depth split values must be positive (got: {raw!r})")
+    return left, right
 
 
 def _is_power_of_two(value: int) -> bool:
@@ -68,6 +83,18 @@ def _apply_pool_block(qc: QuantumCircuit, source: int, target: int, params: Para
     qc.x(source)
     qc.cry(params[offset + 1], source, target)  # controlled-U1 branch
     return offset + 2
+
+
+def _apply_resqnet_layer(qc: QuantumCircuit, n_qubits: int, params, offset: int) -> int:
+    """Apply one ResQNet layer: RX/RY on all qubits + linear CNOT chain."""
+    for q in range(n_qubits):
+        qc.rx(params[offset], q)
+        offset += 1
+        qc.ry(params[offset], q)
+        offset += 1
+    for q in range(n_qubits - 1):
+        qc.cx(q, q + 1)
+    return offset
 
 
 def _build_qcnn(n_qubits: int) -> ArchitectureSpec:
@@ -131,7 +158,67 @@ def _build_qcnn(n_qubits: int) -> ArchitectureSpec:
     )
 
 
-def build_architecture(architecture: str, n_qubits: int) -> ArchitectureSpec:
+def _build_resqnet(
+    n_qubits: int,
+    *,
+    depth_split: tuple[int, int] = (5, 1),
+    residual_mode: str = "structural",
+) -> ArchitectureSpec:
+    d1, d2 = depth_split
+    if d1 <= 0 or d2 <= 0:
+        raise ValueError(f"resqnet depth split must be positive, got {depth_split}")
+    if residual_mode != "structural":
+        raise ValueError(f"Unsupported resqnet residual_mode={residual_mode!r}. Use 'structural'.")
+
+    # Paper-inspired residual approximation for this repository:
+    # a shared "re-upload" layer is applied before QN1 and re-applied before QN2,
+    # while QN1 and QN2 each keep their own trainable layers.
+    shared_params = ParameterVector("phi", 2 * n_qubits)
+    qn1_params = ParameterVector("theta1", 2 * n_qubits * d1)
+    qn2_params = ParameterVector("theta2", 2 * n_qubits * d2)
+
+    circuit = QuantumCircuit(n_qubits, name="resqnet")
+    off_shared = 0
+    off_qn1 = 0
+    off_qn2 = 0
+
+    off_shared = _apply_resqnet_layer(circuit, n_qubits, shared_params, off_shared)
+    circuit.barrier()
+
+    for _ in range(d1):
+        off_qn1 = _apply_resqnet_layer(circuit, n_qubits, qn1_params, off_qn1)
+    circuit.barrier()
+
+    # Residual re-injection path (shared parameters tied to input-side block).
+    off_shared = _apply_resqnet_layer(circuit, n_qubits, shared_params, 0)
+    circuit.barrier()
+
+    for _ in range(d2):
+        off_qn2 = _apply_resqnet_layer(circuit, n_qubits, qn2_params, off_qn2)
+
+    return ArchitectureSpec(
+        name=RESQNET,
+        circuit=circuit,
+        readout_qubit=n_qubits - 1,
+        metadata={
+            "family": "resqnet",
+            "num_nodes": 2,
+            "depth_split": [d1, d2],
+            "total_depth": d1 + d2,
+            "residual_mode": residual_mode,
+            "shared_reupload": True,
+            "layer_design": "rx-ry + linear_cnot",
+        },
+    )
+
+
+def build_architecture(
+    architecture: str,
+    n_qubits: int,
+    *,
+    resqnet_depth_split: tuple[int, int] | None = None,
+    resqnet_residual_mode: str = "structural",
+) -> ArchitectureSpec:
     if n_qubits <= 1:
         raise ValueError(f"n_qubits must be >= 2, got {n_qubits}")
 
@@ -139,6 +226,12 @@ def build_architecture(architecture: str, n_qubits: int) -> ArchitectureSpec:
         return _build_baseline_hea(n_qubits=n_qubits)
     if architecture == QCNN:
         return _build_qcnn(n_qubits=n_qubits)
+    if architecture == RESQNET:
+        return _build_resqnet(
+            n_qubits=n_qubits,
+            depth_split=resqnet_depth_split or (5, 1),
+            residual_mode=resqnet_residual_mode,
+        )
 
     known = ", ".join(available_architectures())
     raise ValueError(f"Unknown architecture '{architecture}'. Available: {known}.")

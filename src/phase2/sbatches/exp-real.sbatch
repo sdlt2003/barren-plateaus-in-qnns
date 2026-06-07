@@ -4,16 +4,21 @@
 #SBATCH --error=outputs/logs/p2_real_hw_M_%A_%a.err
 #SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=2G
-#SBATCH --partition=CPU
-#SBATCH --array=1-25
+#SBATCH --partition=CPU-LARGE
+#SBATCH --time=7-00:00:00
+#SBATCH --array=1-25%2
 
 set -euo pipefail
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
+
+BACKEND="${BACKEND:-ibm_basquecountry}"
+RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-120}"
 
 ARCHITECTURE="${ARCHITECTURE:-baseline_hea}"
 case "$ARCHITECTURE" in
 	baseline_hea) ARCH_LABEL="baseline" ;;
 	qcnn) ARCH_LABEL="qcnn" ;;
+	resqnet) ARCH_LABEL="resqnet" ;;
 	*) ARCH_LABEL="$ARCHITECTURE" ;;
 esac
 RUN_LABEL="phase2_${ARCH_LABEL}-real-hw"
@@ -31,7 +36,7 @@ RUN_ROOT="outputs/$(<"$RUN_META_DIR/run_name.txt")"
 mkdir -p "$RUN_ROOT"
 
 SEEDS=(10 20 30 40 50)  # 5 semillas
-if [[ "$ARCHITECTURE" == "qcnn" ]]; then
+if [[ "$ARCHITECTURE" == "qcnn" || "$ARCHITECTURE" == "resqnet" ]]; then
 	QUBITS=(4 8 16)      # Solo potencias de 2 en el rango original
 else
 	QUBITS=(4 8 12 16 20)
@@ -66,6 +71,8 @@ echo "Phase2 real-hw | arch=$ARCHITECTURE | seed=$SEED | qubits=$Q | task=$SLURM
 echo "Slurm job name: $TASK_JOB_NAME"
 echo "Run root: $RUN_ROOT"
 echo "Budget evals: $BUDGET_EVALS"
+echo "Backend: $BACKEND"
+echo "Runtime result timeout: $RUNTIME_RESULT_TIMEOUT"
 
 bnd run --cpu python src/phase2/exp-real.py \
 	--architecture "$ARCHITECTURE" \
@@ -75,6 +82,8 @@ bnd run --cpu python src/phase2/exp-real.py \
 	--shots 1024 \
 	--window 10 \
 	--tolerance 1e-3 \
+	--backend "$BACKEND" \
+	--runtime-result-timeout "$RUNTIME_RESULT_TIMEOUT" \
 	--outdir "$RUN_DIR"
 
 echo "Completed: seed=$SEED, n_qubits=$Q"

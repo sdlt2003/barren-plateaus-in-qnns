@@ -15,11 +15,51 @@ import os
 import csv
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List
 
 FLAT_RUN_DIR_RE = re.compile(r"seed_(?P<seed>-?\d+)_qubits_(?P<qubits>\d+)$")
 SEED_DIR_RE = re.compile(r"seed_(?P<seed>-?\d+)$")
 QUBITS_DIR_RE = re.compile(r"qubits_(?P<qubits>\d+)$")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_runtime_outdir(outdir: str, *, project_root: Path | None = None) -> str:
+    """Map outdir to a project-relative path safe inside bnd/container runs.
+
+    ``bnd run`` executes Python with the repo mounted at ``/work``. Host absolute
+    paths such as ``/home/.../barren-plateaus-qnns/outputs/run`` do not exist there
+    and make ``os.makedirs`` fail after a successful hardware run.
+    """
+    outdir_path = Path(outdir)
+    root = project_root or PROJECT_ROOT
+
+    if not outdir_path.is_absolute():
+        return str(outdir_path)
+
+    parts = outdir_path.parts
+
+    # Prefer anchoring at outputs/, the standard artifact root for this repo.
+    if "outputs" in parts:
+        idx = parts.index("outputs")
+        return str(Path(*parts[idx:]))
+
+    repo_name = root.name
+    if repo_name in parts:
+        suffix = Path(*parts[parts.index(repo_name) + 1 :])
+        if str(suffix):
+            return str(suffix)
+
+    try:
+        return str(outdir_path.resolve().relative_to(root.resolve()))
+    except (ValueError, OSError):
+        pass
+
+    raise ValueError(
+        f"Cannot map outdir {outdir!r} to a project-relative path. "
+        "Pass a path relative to the repo root, e.g. outputs/my_run/seed_10/qubits_4."
+    )
 
 
 @dataclass
@@ -238,6 +278,7 @@ def make_objective(
     ansatz,
     observable,
     budget_evals: int | None = None,
+    result_timeout_s: float | None = None,
 ) -> Callable:
     def objective(parameters):
         next_count = counts[name] + 1
@@ -246,7 +287,15 @@ def make_objective(
 
         counts[name] = next_count
         pub = (ansatz, observable, [parameters])
-        result = estimator.run([pub]).result()[0]
+        job = estimator.run([pub])
+        if result_timeout_s is None:
+            result = job.result()[0]
+        else:
+            try:
+                result = job.result(timeout=result_timeout_s)[0]
+            except TypeError:
+                # Some local estimators may not support timeout keyword.
+                result = job.result()[0]
         cost = result.data.evs[0]
         history[name]["evals"].append(counts[name])
         history[name]["cost"].append(cost)
@@ -256,15 +305,9 @@ def make_objective(
 
 
 def with_early_stopping(objective: Callable, *, history: dict, key: str, window: int, tolerance: float, stop_exception: type) -> Callable:
-    def wrapped(parameters):
-        cost = objective(parameters)
-        if len(history[key]["cost"]) >= window:
-            last_window = history[key]["cost"][-window:]
-            if max(last_window) - min(last_window) < tolerance:
-                raise stop_exception()
-        return cost
-
-    return wrapped
+    # Early stopping disabled globally:
+    # keep a shared evaluation budget across optimizers and stop only by budget.
+    return objective
 
 
 def make_fidelity(*, counts: dict, key: str, circuit, budget_evals: int | None = None):
@@ -342,12 +385,18 @@ def save_optimizer_time_series(history: dict, outdir: str, *, filename: str = "o
     _plot("budget", "Eval count", budget_filename)
 
 
-def save_final_cost_boxplot(rows: list, agg: dict, outdir: str, *, filename: str = "final_cost_vs_qubits.png") -> None:
+def save_final_cost_boxplot(rows: list, agg: dict, outdir: str) -> list[str]:
     """Save boxplots of final costs per optimizer grouped by qubit counts.
+
+    Writes two fixed-scale views for direct cross-run comparison:
+    - ``final_cost_vs_qubits.png``: y-axis from 0 to -1 (convergence zoom)
+    - ``final_cost_vs_qubits_full.png``: y-axis from 1 to -1 (full range)
 
     `rows` is a list of RunSummary-like objects with attributes `qubits`,
     `cobyla_final_cost`, and `qnspsa_final_cost`.
     `agg` is the aggregated dictionary produced by `analyze_outputs.aggregate`.
+
+    Returns the list of saved plot paths.
     """
     qubits = sorted(agg)
 
@@ -360,8 +409,6 @@ def save_final_cost_boxplot(rows: list, agg: dict, outdir: str, *, filename: str
 
     positions = np.arange(len(qubits), dtype=float)
     box_width = 0.32
-
-    plt.figure(figsize=(9.5, 5.8))
     common_box_style = dict(
         patch_artist=True,
         widths=0.26,
@@ -370,39 +417,51 @@ def save_final_cost_boxplot(rows: list, agg: dict, outdir: str, *, filename: str
         whis=1.5,
     )
 
-    cobyla_box = plt.boxplot(
-        cobyla_samples,
-        positions=positions - box_width / 2,
-        **common_box_style,
+    plot_specs = (
+        ("final_cost_vs_qubits.png", -1.0, 0.0, "Final Cost vs Qubits (0 to -1)"),
+        ("final_cost_vs_qubits_full.png", -1.0, 1.0, "Final Cost vs Qubits (1 to -1)"),
     )
-    qnspsa_box = plt.boxplot(
-        qnspsa_samples,
-        positions=positions + box_width / 2,
-        **common_box_style,
-    )
+    saved_paths: list[str] = []
 
-    for patch in cobyla_box["boxes"]:
-        patch.set_facecolor("#4C78A8")
-        patch.set_alpha(0.55)
-    for patch in qnspsa_box["boxes"]:
-        patch.set_facecolor("#54A24B")
-        patch.set_alpha(0.55)
+    for filename, y_min, y_max, title in plot_specs:
+        plt.figure(figsize=(9.5, 5.8))
 
-    for element in ["whiskers", "caps", "medians", "means"]:
-        for artist in cobyla_box[element]:
-            artist.set_color("#2F4B7C")
-        for artist in qnspsa_box[element]:
-            artist.set_color("#2E6E2F")
+        cobyla_box = plt.boxplot(
+            cobyla_samples,
+            positions=positions - box_width / 2,
+            **common_box_style,
+        )
+        qnspsa_box = plt.boxplot(
+            qnspsa_samples,
+            positions=positions + box_width / 2,
+            **common_box_style,
+        )
 
-    plt.axhline(y=-1.0, color="r", linestyle="--", linewidth=1.2, label="Theoretical min")
-    plt.xticks(positions, [str(q) for q in qubits])
-    plt.xlabel("Qubits")
-    plt.ylabel("Final cost")
-    plt.title("Final Cost vs Qubits")
-    # Keep a fixed cost scale across analyses for direct visual comparison.
-    plt.ylim(-1.0, 0.0)
-    plt.grid(True, axis="y", linestyle="--", alpha=0.4)
-    plt.legend([cobyla_box["boxes"][0], qnspsa_box["boxes"][0]], ["COBYLA", "QNSPSA"], loc="best")
-    plt.tight_layout()
-    plt.savefig(os.path.join(outdir, filename), dpi=180)
-    plt.close()
+        for patch in cobyla_box["boxes"]:
+            patch.set_facecolor("#4C78A8")
+            patch.set_alpha(0.55)
+        for patch in qnspsa_box["boxes"]:
+            patch.set_facecolor("#54A24B")
+            patch.set_alpha(0.55)
+
+        for element in ["whiskers", "caps", "medians", "means"]:
+            for artist in cobyla_box[element]:
+                artist.set_color("#2F4B7C")
+            for artist in qnspsa_box[element]:
+                artist.set_color("#2E6E2F")
+
+        plt.axhline(y=-1.0, color="r", linestyle="--", linewidth=1.2, label="Theoretical min")
+        plt.xticks(positions, [str(q) for q in qubits])
+        plt.xlabel("Qubits")
+        plt.ylabel("Final cost")
+        plt.title(title)
+        plt.ylim(y_min, y_max)
+        plt.grid(True, axis="y", linestyle="--", alpha=0.4)
+        plt.legend([cobyla_box["boxes"][0], qnspsa_box["boxes"][0]], ["COBYLA", "QNSPSA"], loc="best")
+        plt.tight_layout()
+        out_path = os.path.join(outdir, filename)
+        plt.savefig(out_path, dpi=180)
+        plt.close()
+        saved_paths.append(out_path)
+
+    return saved_paths
