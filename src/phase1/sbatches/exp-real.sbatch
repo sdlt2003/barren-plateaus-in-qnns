@@ -6,7 +6,7 @@
 #SBATCH --mem-per-cpu=2G
 #SBATCH --partition=CPU-LARGE
 #SBATCH --time=7-00:00:00
-#SBATCH --array=1-25%2
+#SBATCH --array=1-25%1
 
 # Fail the job if any command fails.
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
 
 BACKEND="${BACKEND:-ibm_basquecountry}"
-RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-120}"
+RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-600}"
 
 RUN_LABEL="phase1_baseline-real-hw"
 RUN_META_DIR="outputs/.runmeta/${SLURM_ARRAY_JOB_ID}"

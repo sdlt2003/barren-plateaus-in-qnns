@@ -6,13 +6,16 @@
 #SBATCH --mem-per-cpu=2G
 #SBATCH --partition=CPU-LARGE
 #SBATCH --time=7-00:00:00
-#SBATCH --array=1-25%2
+#SBATCH --array=1-5%1
 
 set -euo pipefail
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
 
 BACKEND="${BACKEND:-ibm_basquecountry}"
-RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-120}"
+# Empty/unset = wait without client-side timeout (IBM-recommended).
+RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-}"
+# Empty/unset = Session() without max_time (IBM plan default, typically ~8h Premium).
+SESSION_MAX_TIME="${SESSION_MAX_TIME:-}"
 
 ARCHITECTURE="${ARCHITECTURE:-baseline_hea}"
 case "$ARCHITECTURE" in
@@ -35,55 +38,53 @@ mkdir -p "$RUN_META_DIR"
 RUN_ROOT="outputs/$(<"$RUN_META_DIR/run_name.txt")"
 mkdir -p "$RUN_ROOT"
 
-SEEDS=(10 20 30 40 50)  # 5 semillas
+SEEDS=(10 20 30 40 50)
 if [[ "$ARCHITECTURE" == "qcnn" || "$ARCHITECTURE" == "resqnet" ]]; then
-	QUBITS=(4 8 16)      # Solo potencias de 2 en el rango original
+	QUBIT_SIZES="4,8,16"
 else
-	QUBITS=(4 8 12 16 20)
+	QUBIT_SIZES="4,8,12,16,20"
 fi
-NUM_SEEDS=${#SEEDS[@]}
-NUM_QUBITS=${#QUBITS[@]}
-TOTAL_TASKS=$((NUM_SEEDS * NUM_QUBITS))
 
-if (( SLURM_ARRAY_TASK_ID > TOTAL_TASKS )); then
-	echo "Skipping task $SLURM_ARRAY_TASK_ID (TOTAL_TASKS=$TOTAL_TASKS for arch=$ARCHITECTURE)"
+SEED_IDX=$((SLURM_ARRAY_TASK_ID - 1))
+if (( SEED_IDX < 0 || SEED_IDX >= ${#SEEDS[@]} )); then
+	echo "Skipping task $SLURM_ARRAY_TASK_ID (invalid seed index)"
 	exit 0
 fi
 
-# Índices 2D en orden qubit-major.
-IDX=$((SLURM_ARRAY_TASK_ID - 1))
-Q_IDX=$((IDX / NUM_SEEDS))
-SEED_IDX=$((IDX % NUM_SEEDS))
-
 SEED=${SEEDS[$SEED_IDX]}
-Q=${QUBITS[$Q_IDX]}
-TASK_JOB_NAME="p2_real_${ARCH_LABEL}_s${SEED}_q${Q}"
+TASK_JOB_NAME="p2_real_${ARCH_LABEL}_s${SEED}"
 scontrol update JobId="${SLURM_JOB_ID}" JobName="${TASK_JOB_NAME}" >/dev/null 2>&1 || true
 
-SEED_DIR="${RUN_ROOT}/seed_${SEED}"
-RUN_DIR="${SEED_DIR}/qubits_${Q}"
-mkdir -p "$RUN_DIR"
+mkdir -p "${RUN_ROOT}/seed_${SEED}"
 
-# Reduced but increasing exponentially with qubits.
-BUDGET_EVALS=$((32 * (2 ** ((Q - 4) / 4))))
-
-echo "Phase2 real-hw | arch=$ARCHITECTURE | seed=$SEED | qubits=$Q | task=$SLURM_ARRAY_TASK_ID"
+echo "Phase2 real-hw | arch=$ARCHITECTURE | seed=$SEED | qubits=$QUBIT_SIZES | task=$SLURM_ARRAY_TASK_ID"
 echo "Slurm job name: $TASK_JOB_NAME"
 echo "Run root: $RUN_ROOT"
-echo "Budget evals: $BUDGET_EVALS"
 echo "Backend: $BACKEND"
-echo "Runtime result timeout: $RUNTIME_RESULT_TIMEOUT"
+echo "Session max_time: ${SESSION_MAX_TIME:-IBM plan default}"
+echo "Runtime result timeout: ${RUNTIME_RESULT_TIMEOUT:-disabled}"
+echo "IBM session mode: one session per seed"
+
+TIMEOUT_ARGS=()
+if [[ -n "$RUNTIME_RESULT_TIMEOUT" ]]; then
+	TIMEOUT_ARGS=(--runtime-result-timeout "$RUNTIME_RESULT_TIMEOUT")
+fi
+
+SESSION_ARGS=()
+if [[ -n "$SESSION_MAX_TIME" ]]; then
+	SESSION_ARGS=(--session-max-time "$SESSION_MAX_TIME")
+fi
 
 bnd run --cpu python src/phase2/exp-real.py \
 	--architecture "$ARCHITECTURE" \
-	--n_qubits "$Q" \
 	--seed "$SEED" \
-	--budget-evals "$BUDGET_EVALS" \
+	--run-root "$RUN_ROOT" \
+	--qubit-sizes "$QUBIT_SIZES" \
 	--shots 1024 \
 	--window 10 \
 	--tolerance 1e-3 \
 	--backend "$BACKEND" \
-	--runtime-result-timeout "$RUNTIME_RESULT_TIMEOUT" \
-	--outdir "$RUN_DIR"
+	"${SESSION_ARGS[@]}" \
+	"${TIMEOUT_ARGS[@]}"
 
-echo "Completed: seed=$SEED, n_qubits=$Q"
+echo "Completed seed=$SEED across qubits=$QUBIT_SIZES"

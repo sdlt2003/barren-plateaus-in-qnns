@@ -33,3 +33,8 @@ REAL_HW_DEFAULT_BUDGET_K = 10
 REAL_HW_MAX_BUDGET_EVALS = None
 REAL_HW_EARLY_STOPPING_WINDOW = 30
 REAL_HW_DEFAULT_SHOTS = 1024
+# IBM docs: wait for job.result() without a client-side timeout unless debugging.
+REAL_HW_RUNTIME_RESULT_TIMEOUT = None
+# None = do not pass max_time to Session(); IBM uses the plan default (often ~8h Premium).
+# Set e.g. "8h" or "12h" explicitly via --session-max-time or SESSION_MAX_TIME if needed.
+REAL_HW_SESSION_MAX_TIME = None

@@ -1,0 +1,7 @@
+{
+  "architecture": "baseline_hea",
+  "backend": "ibm_basquecountry",
+  "error": "IBMRuntimeError('Failed to run program: \\'400 Client Error: Bad Request for url: https://eu-de.quantum.cloud.ibm.com/api/v1/jobs. {\"errors\":[{\"code\":1217,\"message\":\"Session has been closed.\",\"solution\":\"Increase the session `max_time` if possible, or keep session active by reducing the time between jobs.  For details, see the [Session length](https://quantum.cloud.ibm.com/docs/guides/run-jobs-session#session-length) guide.\",\"more_info\":\"https://cloud.ibm.com/apidocs/quantum-computing#error-handling\"}],\"trace\":\"1f90adfe-6c66-4a03-88ee-6e602c0513cc\"}\\\\n\\'')",
+  "runtime_result_timeout_s": null,
+  "status": "failed_runtime"
+}

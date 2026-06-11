@@ -301,7 +301,7 @@ def main() -> None:
     p.add_argument(
         "--runtime-result-timeout",
         type=float,
-        default=120.0,
+        default=600.0,
         help="Maximum seconds to wait for each Estimator result() call before raising timeout.",
     )
     args = p.parse_args()

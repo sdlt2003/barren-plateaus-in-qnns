@@ -1,0 +1,7 @@
+{
+  "architecture": "baseline_hea",
+  "backend": "ibm_basquecountry",
+  "error": "RuntimeJobFailureError('Unable to retrieve job result. Error code 9705; Failed to execute program: Temporary Internal Error. Try again or contact support. -- https://ibm.biz/error_codes#9705')",
+  "runtime_result_timeout_s": null,
+  "status": "failed_runtime"
+}
