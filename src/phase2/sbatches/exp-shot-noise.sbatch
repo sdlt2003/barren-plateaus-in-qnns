@@ -17,7 +17,7 @@ case "$ARCHITECTURE" in
 	resqnet) ARCH_LABEL="resqnet" ;;
 	*) ARCH_LABEL="$ARCHITECTURE" ;;
 esac
-RUN_LABEL="phase2_${ARCH_LABEL}-shot-noise"
+RUN_LABEL="phase2_shot-noise_${ARCH_LABEL}"
 RUN_META_DIR="outputs/.runmeta/${SLURM_ARRAY_JOB_ID}"
 mkdir -p "$RUN_META_DIR"
 

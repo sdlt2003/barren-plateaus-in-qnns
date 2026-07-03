@@ -14,7 +14,7 @@ from qiskit.quantum_info import SparsePauliOp
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_algorithms.optimizers import COBYLA, QNSPSA
 from qiskit_ibm_runtime import Estimator as RuntimeEstimator
-from qiskit_ibm_runtime import QiskitRuntimeService, Session
+from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime.options import EstimatorOptions
 from qiskit_ibm_runtime.utils.validations import validate_isa_circuits
 
@@ -26,11 +26,20 @@ from hyperparams import (  # noqa: E402
     EARLY_STOPPING_TOLERANCE,
     MIN_BUDGET_EVALS,
     REAL_HW_DEFAULT_BUDGET_K as DEFAULT_BUDGET_K,
+    REAL_HW_FIXED_BUDGET_BASE,
     REAL_HW_DEFAULT_SHOTS as DEFAULT_SHOTS,
     REAL_HW_EARLY_STOPPING_WINDOW as EARLY_STOPPING_WINDOW,
     REAL_HW_MAX_BUDGET_EVALS as MAX_BUDGET_EVALS,
+    REAL_HW_EXECUTION_MODE as DEFAULT_EXECUTION_MODE,
     REAL_HW_RUNTIME_RESULT_TIMEOUT as DEFAULT_RUNTIME_RESULT_TIMEOUT,
+    REAL_HW_RUNTIME_MAX_TIME as DEFAULT_RUNTIME_MAX_TIME,
     REAL_HW_SESSION_MAX_TIME as DEFAULT_SESSION_MAX_TIME,
+)
+from utils_runtime import (  # noqa: E402
+    describe_runtime_mode,
+    normalize_execution_mode,
+    normalize_runtime_max_time,
+    runtime_execution_mode,
 )
 from phase2.architectures import available_architectures, build_architecture, parse_depth_split  # noqa: E402
 from utils import (  # noqa: E402
@@ -98,8 +107,9 @@ def select_backend(service: QiskitRuntimeService, backend_name: str | None, n_qu
     return service.least_busy(operational=True, simulator=False, min_num_qubits=n_qubits)
 
 
-def real_hw_budget_evals(n_qubits: int) -> int:
-    return 32 * (2 ** ((n_qubits - 4) // 4))
+def real_hw_fixed_budget_evals(n_qubits: int) -> int:
+    """Legacy fixed budget by qubits only: base * 2^((Q-4)/4)."""
+    return REAL_HW_FIXED_BUDGET_BASE * (2 ** ((n_qubits - 4) // 4))
 
 
 def parse_qubit_sizes(raw: str) -> list[int]:
@@ -107,6 +117,24 @@ def parse_qubit_sizes(raw: str) -> list[int]:
     if not sizes:
         raise ValueError("qubit_sizes must contain at least one integer")
     return sizes
+
+
+def _load_ibm_credentials() -> tuple[str, str | None]:
+    load_env_file(".env")
+    token = get_env_first("QISKIT_IBM_TOKEN", "API_KEY")
+    instance = get_env_first("QISKIT_IBM_INSTANCE", "CRN_KEY")
+    if not token:
+        raise RuntimeError("Missing IBM token. Set QISKIT_IBM_TOKEN or API_KEY in .env/environment.")
+    return token, instance
+
+
+def _point_is_completed(outdir: str) -> bool:
+    status_path = os.path.join(resolve_runtime_outdir(outdir), "run_status.json")
+    if not os.path.isfile(status_path):
+        return False
+    with open(status_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload.get("status") == "completed"
 
 
 def _save_run_results(outdir: str, history: dict, run_status: dict) -> None:
@@ -133,8 +161,10 @@ def run_qubit_point(
     tol: float,
     runtime_result_timeout: float | None,
     architecture: str,
+    execution_mode: str,
     resqnet_depth_split: tuple[int, int],
     resqnet_residual_mode: str,
+    optimizer: str = "both",
 ) -> bool:
     outdir = resolve_runtime_outdir(outdir)
     if seed is not None:
@@ -182,66 +212,72 @@ def run_qubit_point(
         "status": "failed",
         "backend": backend.name,
         "architecture": architecture,
+        "execution_mode": execution_mode,
+        "optimizer": optimizer,
         "runtime_result_timeout_s": runtime_result_timeout,
         "error": None,
     }
     try:
-        objective_cobyla = with_early_stopping(
-            make_objective(
-                "cobyla",
-                counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-                result_timeout_s=runtime_result_timeout,
-            ),
-            history=history,
-            key="cobyla",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-        objective_qnspsa = with_early_stopping(
-            make_objective(
-                "qnspsa",
-                counts=counts,
-                history=history,
-                estimator=estimator,
-                ansatz=ansatz,
-                observable=observable,
-                budget_evals=resolved_budget_evals,
-                result_timeout_s=runtime_result_timeout,
-            ),
-            history=history,
-            key="qnspsa",
-            window=window,
-            tolerance=tol,
-            stop_exception=ConvergenceReached,
-        )
-        fidelity = make_fidelity(
-            counts=counts,
-            key="qnspsa",
-            circuit=ansatz_logical,
-            budget_evals=resolved_budget_evals,
-        )
-
         print(f"Backend: {backend.name} | Architecture: {architecture} | qubits={n_qubits}")
-        run_optimizer(
-            "cobyla",
-            COBYLA(maxiter=resolved_budget_evals),
-            objective_cobyla,
-            initial_parameters,
-            counts=counts,
-        )
-        run_optimizer(
-            "qnspsa",
-            QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
-            objective_qnspsa,
-            initial_parameters,
-            counts=counts,
-        )
+
+        if optimizer in ("both", "cobyla"):
+            objective_cobyla = with_early_stopping(
+                make_objective(
+                    "cobyla",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="cobyla",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+            run_optimizer(
+                "cobyla",
+                COBYLA(maxiter=resolved_budget_evals),
+                objective_cobyla,
+                initial_parameters,
+                counts=counts,
+            )
+
+        if optimizer in ("both", "qnspsa"):
+            objective_qnspsa = with_early_stopping(
+                make_objective(
+                    "qnspsa",
+                    counts=counts,
+                    history=history,
+                    estimator=estimator,
+                    ansatz=ansatz,
+                    observable=observable,
+                    budget_evals=resolved_budget_evals,
+                    result_timeout_s=runtime_result_timeout,
+                ),
+                history=history,
+                key="qnspsa",
+                window=window,
+                tolerance=tol,
+                stop_exception=ConvergenceReached,
+            )
+            fidelity = make_fidelity(
+                counts=counts,
+                key="qnspsa",
+                circuit=ansatz_logical,
+                budget_evals=resolved_budget_evals,
+            )
+            run_optimizer(
+                "qnspsa",
+                QNSPSA(fidelity=fidelity, maxiter=resolved_budget_evals),
+                objective_qnspsa,
+                initial_parameters,
+                counts=counts,
+            )
+
         run_status["status"] = "completed"
         return True
     except Exception as exc:
@@ -251,6 +287,77 @@ def run_qubit_point(
         return False
     finally:
         _save_run_results(outdir, history, run_status)
+
+
+def run_single_point_hw(
+    *,
+    n_qubits: int,
+    outdir: str,
+    seed: int | None,
+    budget_evals: int | None,
+    budget_k: float | None,
+    window: int,
+    tol: float,
+    shots: int,
+    backend_name: str | None,
+    channel: str,
+    optimization_level: int | None,
+    resilience_level: int | None,
+    runtime_result_timeout: float | None,
+    runtime_max_time: str | None,
+    execution_mode: str,
+    architecture: str,
+    resqnet_depth_split: tuple[int, int],
+    resqnet_residual_mode: str,
+    optimizer: str = "both",
+    skip_completed: bool = False,
+) -> bool:
+    """Run one (seed, qubits) point inside a single IBM session/batch/job container."""
+    outdir = resolve_runtime_outdir(outdir)
+    if skip_completed and _point_is_completed(outdir):
+        print(f"Skipping completed point: seed={seed} qubits={n_qubits} outdir={outdir}")
+        return True
+
+    mode = normalize_execution_mode(execution_mode)
+    runtime_max_time = normalize_runtime_max_time(runtime_max_time)
+    token, instance = _load_ibm_credentials()
+
+    print("Runtime preflight: creating IBM Runtime service...")
+    service = build_runtime_service(channel=channel, token=token, instance=instance)
+    print("Runtime preflight: selecting backend...")
+    backend = select_backend(service, backend_name, n_qubits)
+    print(f"Runtime preflight: selected backend={backend.name}")
+
+    opt_level = 1 if optimization_level is None else optimization_level
+    pm = generate_preset_pass_manager(backend=backend, optimization_level=opt_level)
+    options = configure_options(shots=shots, resilience_level=resilience_level)
+
+    print(f"Runtime execution: {describe_runtime_mode(mode, runtime_max_time)}")
+    print(
+        f"Runtime execution: result timeout="
+        f"{'disabled (IBM default wait)' if runtime_result_timeout is None else runtime_result_timeout}s"
+    )
+    with runtime_execution_mode(backend, mode=mode, max_time=runtime_max_time) as container:
+        print(f"Runtime execution: {mode} container ready.")
+        estimator = RuntimeEstimator(mode=container, options=options)
+        return run_qubit_point(
+            estimator=estimator,
+            backend=backend,
+            pm=pm,
+            n_qubits=n_qubits,
+            outdir=outdir,
+            seed=seed,
+            budget_evals=budget_evals,
+            budget_k=budget_k,
+            window=window,
+            tol=tol,
+            runtime_result_timeout=runtime_result_timeout,
+            architecture=architecture,
+            execution_mode=mode,
+            resqnet_depth_split=resqnet_depth_split,
+            resqnet_residual_mode=resqnet_residual_mode,
+            optimizer=optimizer,
+        )
 
 
 def run_seed_session_grid(
@@ -268,73 +375,56 @@ def run_seed_session_grid(
     optimization_level: int | None,
     resilience_level: int | None,
     runtime_result_timeout: float | None,
-    session_max_time: str | None,
+    runtime_max_time: str | None,
+    execution_mode: str,
     architecture: str,
     resqnet_depth_split: tuple[int, int],
     resqnet_residual_mode: str,
+    skip_completed: bool = False,
 ) -> None:
+    """Legacy: multiple qubit sizes in one IBM container (not recommended for long grids)."""
     run_root = resolve_runtime_outdir(run_root)
     os.makedirs(run_root, exist_ok=True)
 
-    load_env_file(".env")
-    token = get_env_first("QISKIT_IBM_TOKEN", "API_KEY")
-    instance = get_env_first("QISKIT_IBM_INSTANCE", "CRN_KEY")
-    if not token:
-        raise RuntimeError("Missing IBM token. Set QISKIT_IBM_TOKEN or API_KEY in .env/environment.")
-
-    print("Runtime preflight: creating IBM Runtime service...")
-    service = build_runtime_service(channel=channel, token=token, instance=instance)
-    print("Runtime preflight: selecting backend...")
-    backend = select_backend(service, backend_name, max(qubit_sizes))
-    print(f"Runtime preflight: selected backend={backend.name}")
-
-    opt_level = 1 if optimization_level is None else optimization_level
-    pm = generate_preset_pass_manager(backend=backend, optimization_level=opt_level)
-    options = configure_options(shots=shots, resilience_level=resilience_level)
-
     completed = 0
     failed = 0
-    session_kwargs: dict[str, str] = {}
-    if session_max_time:
-        session_kwargs["max_time"] = session_max_time
-        print(f"Runtime execution: session max_time={session_max_time}")
-    else:
-        print("Runtime execution: session max_time=IBM plan default (not set in client)")
-    print(
-        f"Runtime execution: result timeout="
-        f"{'disabled (IBM default wait)' if runtime_result_timeout is None else runtime_result_timeout}s"
-    )
-    with Session(backend=backend, **session_kwargs) as session:
-        print("Runtime execution: session initialized.")
-        estimator = RuntimeEstimator(mode=session, options=options)
-        for n_qubits in qubit_sizes:
-            point_budget = real_hw_budget_evals(n_qubits) if budget_evals is None else budget_evals
-            outdir = os.path.join(run_root, f"seed_{seed}", f"qubits_{n_qubits}")
-            print(f"\n========== seed={seed} qubits={n_qubits} budget={point_budget} ==========")
-            ok = run_qubit_point(
-                estimator=estimator,
-                backend=backend,
-                pm=pm,
-                n_qubits=n_qubits,
-                outdir=outdir,
-                seed=seed,
-                budget_evals=point_budget,
-                budget_k=budget_k,
-                window=window,
-                tol=tol,
-                runtime_result_timeout=runtime_result_timeout,
-                architecture=architecture,
-                resqnet_depth_split=resqnet_depth_split,
-                resqnet_residual_mode=resqnet_residual_mode,
-            )
-            if ok:
-                completed += 1
-            else:
-                failed += 1
+    skipped = 0
+    for n_qubits in qubit_sizes:
+        outdir = os.path.join(run_root, f"seed_{seed}", f"qubits_{n_qubits}")
+        print(f"\n========== seed={seed} qubits={n_qubits} ==========")
+        if skip_completed and _point_is_completed(outdir):
+            print(f"Skipping completed point: {outdir}")
+            skipped += 1
+            continue
+        ok = run_single_point_hw(
+            n_qubits=n_qubits,
+            outdir=outdir,
+            seed=seed,
+            budget_evals=budget_evals,
+            budget_k=budget_k,
+            window=window,
+            tol=tol,
+            shots=shots,
+            backend_name=backend_name,
+            channel=channel,
+            optimization_level=optimization_level,
+            resilience_level=resilience_level,
+            runtime_result_timeout=runtime_result_timeout,
+            runtime_max_time=runtime_max_time,
+            execution_mode=execution_mode,
+            architecture=architecture,
+            resqnet_depth_split=resqnet_depth_split,
+            resqnet_residual_mode=resqnet_residual_mode,
+            skip_completed=False,
+        )
+        if ok:
+            completed += 1
+        else:
+            failed += 1
 
     print(
-        f"Seed {seed} session complete: completed={completed}, failed={failed}, "
-        f"total={len(qubit_sizes)}"
+        f"Seed {seed} grid complete: completed={completed}, failed={failed}, "
+        f"skipped={skipped}, total={len(qubit_sizes)}"
     )
 
 
@@ -352,56 +442,37 @@ def optimizer_compare(
     optimization_level: int | None,
     resilience_level: int | None,
     runtime_result_timeout: float | None,
-    session_max_time: str | None,
+    runtime_max_time: str | None,
+    execution_mode: str,
     architecture: str,
     resqnet_depth_split: tuple[int, int],
     resqnet_residual_mode: str,
+    optimizer: str = "both",
+    skip_completed: bool = False,
 ) -> None:
-    """Run a single (seed, qubits) point with its own session (CLI/backward compatibility)."""
-    outdir = resolve_runtime_outdir(outdir)
-    load_env_file(".env")
-    token = get_env_first("QISKIT_IBM_TOKEN", "API_KEY")
-    instance = get_env_first("QISKIT_IBM_INSTANCE", "CRN_KEY")
-    if not token:
-        raise RuntimeError("Missing IBM token. Set QISKIT_IBM_TOKEN or API_KEY in .env/environment.")
-
-    print("Runtime preflight: creating IBM Runtime service...")
-    service = build_runtime_service(channel=channel, token=token, instance=instance)
-    print("Runtime preflight: selecting backend...")
-    backend = select_backend(service, backend_name, n_qubits)
-    print(f"Runtime preflight: selected backend={backend.name}")
-
-    opt_level = 1 if optimization_level is None else optimization_level
-    pm = generate_preset_pass_manager(backend=backend, optimization_level=opt_level)
-    options = configure_options(shots=shots, resilience_level=resilience_level)
-
-    session_kwargs: dict[str, str] = {}
-    if session_max_time:
-        session_kwargs["max_time"] = session_max_time
-        print(f"Runtime execution: session max_time={session_max_time}")
-    else:
-        print("Runtime execution: session max_time=IBM plan default (not set in client)")
-
-    print("Runtime execution: opening session...")
-    with Session(backend=backend, **session_kwargs) as session:
-        print("Runtime execution: session initialized.")
-        estimator = RuntimeEstimator(mode=session, options=options)
-        ok = run_qubit_point(
-            estimator=estimator,
-            backend=backend,
-            pm=pm,
-            n_qubits=n_qubits,
-            outdir=outdir,
-            seed=seed,
-            budget_evals=budget_evals,
-            budget_k=budget_k,
-            window=window,
-            tol=tol,
-            runtime_result_timeout=runtime_result_timeout,
-            architecture=architecture,
-            resqnet_depth_split=resqnet_depth_split,
-            resqnet_residual_mode=resqnet_residual_mode,
-        )
+    """Run a single (seed, qubits) point (CLI / Slurm batch task)."""
+    ok = run_single_point_hw(
+        n_qubits=n_qubits,
+        outdir=outdir,
+        seed=seed,
+        budget_evals=budget_evals,
+        budget_k=budget_k,
+        window=window,
+        tol=tol,
+        shots=shots,
+        backend_name=backend_name,
+        channel=channel,
+        optimization_level=optimization_level,
+        resilience_level=resilience_level,
+        runtime_result_timeout=runtime_result_timeout,
+        runtime_max_time=runtime_max_time,
+        execution_mode=execution_mode,
+        architecture=architecture,
+        resqnet_depth_split=resqnet_depth_split,
+        resqnet_residual_mode=resqnet_residual_mode,
+        optimizer=optimizer,
+        skip_completed=skip_completed,
+    )
     if not ok:
         raise RuntimeError(f"Real-hardware run failed for seed={seed}, qubits={n_qubits}")
 
@@ -415,7 +486,7 @@ def main() -> None:
         "--qubit-sizes",
         type=str,
         default=None,
-        help="Comma-separated qubit sizes to run in one IBM session per seed (e.g. 4,8,12,16,20)",
+        help="Legacy multi-q mode: comma-separated sizes run sequentially (one container per q).",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
@@ -464,16 +535,42 @@ def main() -> None:
         "Default: wait without timeout (IBM-recommended for hardware).",
     )
     parser.add_argument(
+        "--execution-mode",
+        type=str,
+        default=DEFAULT_EXECUTION_MODE,
+        choices=["session", "batch", "job"],
+        help="IBM Runtime container: batch (default), session, or job.",
+    )
+    parser.add_argument(
+        "--runtime-max-time",
+        type=str,
+        default=DEFAULT_RUNTIME_MAX_TIME,
+        help="IBM Runtime container TTL for session/batch, e.g. 8h. Omit for IBM plan default.",
+    )
+    parser.add_argument(
         "--session-max-time",
         type=str,
-        default=DEFAULT_SESSION_MAX_TIME,
-        help="IBM Runtime session TTL, e.g. 8h. Omit for IBM plan default (no client cap).",
+        default=None,
+        help="Deprecated alias for --runtime-max-time.",
+    )
+    parser.add_argument(
+        "--skip-completed",
+        action="store_true",
+        help="Skip if outdir/run_status.json already has status=completed.",
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="both",
+        choices=["both", "cobyla", "qnspsa"],
+        help="Which optimizer(s) to run. Default: both.",
     )
     args = parser.parse_args()
 
-    session_max_time = args.session_max_time
-    if session_max_time in (None, "", "none", "None"):
-        session_max_time = None
+    runtime_max_time = args.runtime_max_time
+    if args.session_max_time not in (None, "", "none", "None"):
+        runtime_max_time = args.session_max_time
+    runtime_max_time = normalize_runtime_max_time(runtime_max_time)
 
     common_kwargs = dict(
         seed=args.seed,
@@ -487,16 +584,19 @@ def main() -> None:
         optimization_level=args.optimization_level,
         resilience_level=args.resilience_level,
         runtime_result_timeout=args.runtime_result_timeout,
-        session_max_time=session_max_time,
+        runtime_max_time=runtime_max_time,
+        execution_mode=args.execution_mode,
         architecture=args.architecture,
         resqnet_depth_split=parse_depth_split(args.resqnet_depth_split),
         resqnet_residual_mode=args.resqnet_residual_mode,
+        optimizer=args.optimizer,
+        skip_completed=args.skip_completed,
     )
 
     t0 = time.time()
     if args.qubit_sizes:
         if not args.run_root:
-            raise SystemExit("Seed-session grid mode requires --run-root.")
+            raise SystemExit("Multi-q grid mode requires --run-root.")
         run_seed_session_grid(
             run_root=args.run_root,
             qubit_sizes=parse_qubit_sizes(args.qubit_sizes),

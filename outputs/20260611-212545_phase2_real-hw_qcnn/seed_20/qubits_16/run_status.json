@@ -1,0 +1,8 @@
+{
+  "architecture": "qcnn",
+  "backend": "ibm_basquecountry",
+  "error": null,
+  "execution_mode": "batch",
+  "runtime_result_timeout_s": null,
+  "status": "completed"
+}

@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../../.."
 
-RUN_ROOT="outputs/$(date +%Y%m%d-%H%M%S)_phase1_baseline-real-hw"
+RUN_ROOT="outputs/$(date +%Y%m%d-%H%M%S)_phase1_real-hw_baseline"
 SEED="${SEED:-10}"
 BACKEND="${BACKEND:-ibm_basquecountry}"
 TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-600}"

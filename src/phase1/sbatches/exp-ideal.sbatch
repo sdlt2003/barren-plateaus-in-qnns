@@ -10,7 +10,7 @@
 
 cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
 
-RUN_LABEL="multijob"
+RUN_LABEL="phase1_ideal_baseline"
 RUN_META_DIR="outputs/.runmeta/${SLURM_ARRAY_JOB_ID}"
 mkdir -p "$RUN_META_DIR"
 

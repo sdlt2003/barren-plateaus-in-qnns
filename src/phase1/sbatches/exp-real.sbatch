@@ -16,7 +16,7 @@ cd /home/sdelostoyos/pfs/projects/barren-plateaus-qnns
 BACKEND="${BACKEND:-ibm_basquecountry}"
 RUNTIME_RESULT_TIMEOUT="${RUNTIME_RESULT_TIMEOUT:-600}"
 
-RUN_LABEL="phase1_baseline-real-hw"
+RUN_LABEL="phase1_real-hw_baseline"
 RUN_META_DIR="outputs/.runmeta/${SLURM_ARRAY_JOB_ID}"
 mkdir -p "$RUN_META_DIR"
 

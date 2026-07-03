@@ -1,7 +1,0 @@
-{
-  "architecture": "baseline_hea",
-  "backend": "ibm_basquecountry",
-  "error": "RuntimeInvalidStateError('Unable to retrieve result for job d8k42vsqohqs73dpu850. Job was cancelled.')",
-  "runtime_result_timeout_s": null,
-  "status": "failed_runtime"
-}

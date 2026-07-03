@@ -8,7 +8,6 @@ easy to update.
 # Shared defaults
 EARLY_STOPPING_TOLERANCE = 1e-3
 EARLY_STOPPING_WINDOW = 200
-#TODO Quitar early stopping para que las comparaciones sean más
 
 # Dynamic budgeting
 #
@@ -29,12 +28,18 @@ SIM_MAX_BUDGET_EVALS = None
 SHOT_NOISE_DEFAULT_TARGET_PRECISION = 0.1
 
 # Real hardware (IBM Runtime)
-REAL_HW_DEFAULT_BUDGET_K = 10
+# Dynamic default: budget_evals = round(k * num_params), same rule as simulation.
+REAL_HW_DEFAULT_BUDGET_K = 20
+# Legacy fixed profile (only if budget mode is switched to "fixed" in exp-real.py).
+REAL_HW_FIXED_BUDGET_BASE = 32
 REAL_HW_MAX_BUDGET_EVALS = None
 REAL_HW_EARLY_STOPPING_WINDOW = 30
 REAL_HW_DEFAULT_SHOTS = 1024
 # IBM docs: wait for job.result() without a client-side timeout unless debugging.
 REAL_HW_RUNTIME_RESULT_TIMEOUT = None
-# None = do not pass max_time to Session(); IBM uses the plan default (often ~8h Premium).
-# Set e.g. "8h" or "12h" explicitly via --session-max-time or SESSION_MAX_TIME if needed.
-REAL_HW_SESSION_MAX_TIME = None
+# Default IBM Runtime container for real-hw grids: one Batch per (seed, q) Slurm task.
+REAL_HW_EXECUTION_MODE = "batch"  # session | batch | job
+# None = do not pass max_time to Session()/Batch(); IBM uses the plan default (often ~8h Premium).
+REAL_HW_RUNTIME_MAX_TIME = None
+# Backward-compatible alias used by older CLI/env names.
+REAL_HW_SESSION_MAX_TIME = REAL_HW_RUNTIME_MAX_TIME

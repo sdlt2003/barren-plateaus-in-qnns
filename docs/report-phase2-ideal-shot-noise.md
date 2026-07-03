@@ -5,6 +5,8 @@
 **Escenarios:** simulación ideal (statevector) y shot-noise (Monte Carlo)  
 **Arquitecturas:** `baseline_hea`, `qcnn`, `resqnet`
 
+**Hardware real IBM** (en curso, ver informe aparte): [report-phase2-real-hw-timing.md](report-phase2-real-hw-timing.md) — baseline **19/25**, qcnn **11/20**, resqnet sin lanzar.
+
 **Figuras** (abrir en lateral desde `report-assets/phase2-ideal-shot-noise/`):
 
 
@@ -69,7 +71,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 1. Baseline — ideal
 
-**Carpeta:** `outputs/20260602-224946_phase2_baseline/`  
+**Carpeta:** `outputs/20260602-224946_phase2_ideal_baseline/`  
 **Cobertura:** 20/25 (faltan q=20 excepto ninguno)
 
 ### Agregado por qubits
@@ -98,7 +100,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 2. Baseline HEA — shot-noise
 
-**Carpeta:** `outputs/20260602-224946_phase2_baseline-shot-noise/`  
+**Carpeta:** `outputs/20260602-224946_phase2_shot-noise_baseline/`  
 **Cobertura:** 21/25 (q=20: solo seed 50)
 
 ### Agregado por qubits
@@ -128,7 +130,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 3. QCNN — ideal
 
-**Carpeta:** `outputs/20260602-224946_phase2_qcnn/`  
+**Carpeta:** `outputs/20260602-224946_phase2_ideal_qcnn/`  
 **Cobertura:** 15/15
 
 ### Agregado por qubits
@@ -156,7 +158,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 4. QCNN — shot-noise
 
-**Carpeta:** `outputs/20260602-224946_phase2_qcnn-shot-noise/`  
+**Carpeta:** `outputs/20260602-224946_phase2_shot-noise_qcnn/`  
 **Cobertura:** 15/15
 
 ### Agregado por qubits
@@ -184,7 +186,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 5. ResQNet — ideal
 
-**Carpeta:** `outputs/20260602-224948_phase2_resqnet/`  
+**Carpeta:** `outputs/20260602-224948_phase2_ideal_resqnet/`  
 **Cobertura:** 15/15
 
 ### Agregado por qubits
@@ -212,7 +214,7 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 
 ## 6. ResQNet — shot-noise
 
-**Carpeta:** `outputs/20260602-224948_phase2_resqnet-shot-noise/`  
+**Carpeta:** `outputs/20260602-224948_phase2_shot-noise_resqnet/`  
 **Cobertura:** 15/15
 
 ### Agregado por qubits
@@ -256,6 +258,6 @@ En las tablas agregadas, **cobyla_wins / qnspsa_wins** cuenta cuántas semillas 
 - Regenerar análisis:
 
 ```bash
-bnd run python src/phase1/analyze_outputs.py 20260602-224946_phase2_baseline
+bnd run python src/phase1/analyze_outputs.py 20260602-224946_phase2_ideal_baseline
 ```
 

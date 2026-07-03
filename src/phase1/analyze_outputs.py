@@ -234,6 +234,25 @@ def analyze_single_run(run_root: str) -> int:
     if not rows:
         raise ValueError(f"No valid runs found after parsing input files under: {run_root}")
 
+    # Merge split-optimizer layouts (e.g. qubits_32/opt_cobyla and opt_qnspsa) back into
+    # a single row per (seed, qubits) so downstream CSVs and plots remain comparable.
+    merged: dict[tuple[int, int], RunSummary] = {}
+    for row in rows:
+        key = (row.seed, row.qubits)
+        if key not in merged:
+            merged[key] = row
+            continue
+        base = merged[key]
+        merged[key] = RunSummary(
+            seed=row.seed,
+            qubits=row.qubits,
+            cobyla_final_cost=base.cobyla_final_cost if base.cobyla_final_cost is not None else row.cobyla_final_cost,
+            qnspsa_final_cost=base.qnspsa_final_cost if base.qnspsa_final_cost is not None else row.qnspsa_final_cost,
+            cobyla_evals=base.cobyla_evals if base.cobyla_evals is not None else row.cobyla_evals,
+            qnspsa_evals=base.qnspsa_evals if base.qnspsa_evals is not None else row.qnspsa_evals,
+        )
+    rows = list(merged.values())
+
     per_run_csv = os.path.join(outdir, "summary_per_run.csv")
     agg_csv = os.path.join(outdir, "summary_aggregated.csv")
 

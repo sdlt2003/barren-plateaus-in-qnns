@@ -1,0 +1,8 @@
+{
+  "architecture": "qcnn",
+  "backend": "ibm_basquecountry",
+  "error": "RuntimeJobFailureError('Unable to retrieve job result. Error code 1319; Job was out of sync and in an unexpected state')",
+  "execution_mode": "batch",
+  "runtime_result_timeout_s": null,
+  "status": "failed_runtime"
+}

@@ -1,0 +1,330 @@
+\documentclass[a4paper, 11pt, showtrims]{memoir}
+\semiisopage
+
+\chapterstyle{veelo}
+\pdfobjcompresslevel 0
+
+\newcommand{\egilea}{Sergio de los Toyos Sandoval}
+\newcommand{\zuzendariak}{Jose Antonio Pascual}
+\newcommand{\izenburua}{Mitigating Barren Plateaus in Quantum Neural Networks: Topological and Algorithmic Approaches}
+\newcommand{\data}{\today}
+
+\newcommand{\ikasketak}{Degree in Informatics Engineering}
+\newcommand{\espezialitatea}{Computer Science}
+
+\usepackage[en]{ifcommands}
+\input config/macros
+
+\title{\izenburua}
+\author{\egilea}
+\date{\data}
+
+\begin{document}
+
+\input config/cover_informatika
+
+\cleardoublepage
+\frontmatter
+\aliaspagestyle{chapter}{plain}
+\aliaspagestyle{cleared}{plain}
+\pagestyle{plain}
+\setcounter{page}{1}
+
+\chapter*{Acknowledgements}
+\input chapters/acknowledgements
+
+\cleardoublepage
+\chapter*{Abstract}
+\input chapters/abstract
+
+\cleardoublepage
+\chapter*{Sustainable Development Goals} \label{ch:SDG}
+\input chapters/GJH_ODS_SDG/SDG
+
+\cleardoublepage
+\pdfbookmark[1]{\contentsname}{toc}
+\begin{KeepFromToc}
+  \tableofcontents
+\end{KeepFromToc}
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+\listofalgorithms
+
+\openright
+\cleardoublepage
+\mainmatter
+\pagestyle{ruled}
+
+\chapter{Introduction}
+
+In the current quantum computing era, we face significant limitations that prevent us from fully exploiting the computational power and advantages this new technology can provide. These unresolved challenges can be conceptually divided into two groups: Hardware-driven problems (noise-induced barren plateaus, decoherence, qubit topology, etc.) andSoftware-driven problems (mathematically-induced barren plateaus, lack of specific problem-solving algorithms, etc.)
+
+Researchers and engineers have developed various approaches to address these issues in quantum systems. In fact, Quantum Machine Learning (QML) has grown in popularity in recent years due to the theoretical capabilities it offers. Nevertheless, to date, these advantages remain largely theoretical, and there have been no definitive signs of quantum supremacy (a clear improvement over classical counterparts) in the field of QML.
+
+While multiple factors contribute to this lack of practical advantage, there is a general consensus in the QML community regarding the most critical obstacle holding back the power of this technology: the Barren Plateau (BP) phenomenon. Currently, various solutions and research directions have been proposed to address this issue. However, in most cases, the conclusions remain inconclusive, and the methods used to achieve these solutions often lack a systematic approach. Researchers understand the nature and mechanisms of the problem, but mitigation efforts frequently rely on ad-hoc trial-and-error methods rather than principled frameworks. Furthermore, empirical evidence demonstrates that there is no universal solution; the optimal architectural configuration—such as the choice of Ansatz, optimizer, and initialization strategy—is highly problem-dependent, varying significantly across different datasets, target Hamiltonians, and specific use cases. Without clear theoretical justifications for specific architectural changes, integrating multiple mitigation strategies becomes highly challenging. In this field, modifying one aspect of the quantum circuit can significantly impact the overall system dynamics.
+
+This thesis focuses on the Barren Plateau phenomenon, specifically aiming to mitigate it by implementing and evaluating various state-of-the-art solutions. Applying a single, isolated solution to a specific case where the BP problem is avoided is relatively straightforward. Therefore, rather than evaluating these methods in isolation, this work experiments with solutions derived from distinct theoretical concepts to integrate them into hybrid approaches. Ultimately, the broader goal of this research direction is to determine exactly which combination of architectural and algorithmic decisions is best suited for specific problem characteristics. Although establishing a complete taxonomy of these relationships exceeds the scope of a single thesis, contributing to the foundational understanding of why certain hybrid strategies succeed in specific contexts is a crucial step. Once these underlying dependencies are systematically mapped, a vast array of future research possibilities will be unlocked, significantly accelerating the practical deployment of Quantum Machine Learning.
+
+\chapter{Background}
+
+\section{Review of Important Concepts}
+
+\subsection{Variational Quantum Algorithms (VQAs)}
+
+Variational Quantum Algorithms are hybrid quantum-classical computational frameworks designed to solve optimization problems on Noisy Intermediate-Scale Quantum (NISQ) devices. The architecture consists of a parameterized quantum circuit (often called an Ansatz), denoted by a unitary operation $U(\theta)$, which prepares a quantum state:
+
+\begin{equation}
+|\psi(\theta)\rangle = U(\theta)|0\rangle
+\end{equation}
+
+A classical optimizer is then tasked with updating the parameter vector $\theta$ to minimize a specific objective function $C(\theta)$, typically the expectation value of an observable $H$, such that:
+
+\begin{equation}
+C(\theta) = \langle \psi(\theta)|H|\psi(\theta)\rangle
+\end{equation}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/ansatz.png}
+    \caption{Structure of a Variational Quantum Algorithm.}\label{fig:ansatz}
+\end{figure}
+
+\subsection{The Mathematical Mechanics of Vanishing Gradients}
+
+To understand the trainability crisis in VQAs, it is necessary to define the core mathematical components that drive the optimization process and how they interact to generate the Barren Plateau (BP) phenomenon:
+
+\textbf{1. The Gradient ($\nabla C$):} 
+The gradient is the vector composed of the partial derivatives of the cost function with respect to each model parameter ($\partial C / \partial \theta_i$). It dictates the magnitude and direction of the steepest descent in the optimization hyperspace. In the context of a Barren Plateau, the gradient does not generate the problem; rather, its behavior \textit{is} the problem. In a barren landscape, the expected value of the gradient over the distribution of initial states is zero ($\mathbb{E}[\nabla C] = 0$). Locally, this means the derivative is null, providing the optimizer with no numerical information on how to update the weights to minimize the error.
+
+\textbf{2. Gradient Variance ($\text{Var}(\nabla C)$):} 
+The variance quantifies the statistical dispersion of the gradient values across the entire parameter space, defined formally as:
+\begin{equation}
+\text{Var}(\nabla C) = \mathbb{E}[(\nabla C)^2] - (\mathbb{E}[\nabla C])^2
+\end{equation}
+Variance is the mathematical indicator that certifies the severity of the plateau. Since the expected value of the gradient is zero, variance dictates whether useful fluctuations exist. If the variance is high, steep gradients exist, allowing effective weight updates. Conversely, if the variance decays toward zero, the vast majority of coordinates in the parameter space return a minuscule scalar gradient, requiring infinite computational precision to distinguish it from statistical noise. The reduction of this variance is the direct mechanism that paralyzes the optimizer.
+
+\textbf{3. Model Degree (Complexity and Dimensionality):} 
+In a quantum context, the degree of the model equates to the number of qubits ($n$) and the depth of the circuit ($L$), which dictate that the system operates in a Hilbert space of dimension $D = 2^n$. Increasing the model degree irreversibly forces the variance to drop. The mathematical relationship shows that the variance is upper-bounded by an exponential decay function $\mathcal{O}(c^{-n})$ (where $c > 1$). 
+
+\textbf{Synthesis of the Causal Chain:} 
+The increase in the model's degree exponentially expands the dimensionality of the parameter space. This hyper-dimensionality invokes the concentration of measure (explained below), which forces the gradient variance to decay exponentially toward zero. A statistically null variance ensures that the scalar magnitude of the gradient is zero across almost the entire cost landscape, successfully paralyzing the optimizer's update rule.
+
+\subsection{Foundational Theorems of the Barren Plateau Phenomenon}
+
+The synthesis described above is rigorously supported by foundational theorems in mathematics and quantum physics. The Barren Plateau develops through a strict causal chain grounded in these principles:
+
+\textbf{Expressibility, Haar Measure, and Unitary 2-Designs:}
+If a parameterized quantum circuit is sufficiently deep and entangled, it becomes highly expressive. Mathematically, it generates a distribution of unitaries that forms a unitary 2-design. The \textbf{Haar Measure} is the unique translation-invariant probability measure defined on a locally compact topological group, applied here to the special unitary group $\text{SU}(2^n)$. It represents a perfectly uniform distribution of all possible unitary matrices. When a randomly initialized circuit forms a 2-design, its first two statistical moments are identical to those of the Haar measure. To formally prove exponential variance decay, researchers use \textit{Weingarten Calculus} to integrate over the unitary group, evaluating the Haar integral of the cost function's derivatives. At this point, the initial parameters fail to provide any localized mathematical structure.
+
+\textbf{Concentration of Measure (Levy's Lemma):}
+Once the circuit forms a 2-design, it operates uniformly across a Hilbert space of dimension $D = 2^n$. The \textbf{Levy's Lemma} establishes a strict probabilistic bound in high-dimensional metric spaces. It dictates that for any Lipschitz-continuous function $f: \mathbb{S}^{D-1} \to \mathbb{R}$ defined on a unit sphere of dimension $D$, the probability that a randomly evaluated value deviates from its mean $\mu$ by a magnitude greater than $\epsilon$ is exponentially bounded:
+\begin{equation}
+\mathbb{P}(|f(x) - \mu| \ge \epsilon) \le 2 \exp\left(-\frac{C D \epsilon^2}{\|f\|_{Lip}^2}\right)
+\end{equation}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/concentration_of_measure.png}
+    \caption{Visual representation of the concentration of measure in high-dimensional spaces.}\label{fig:concentration}
+\end{figure}
+
+Where $C$ is a universal constant. Since $D$ grows exponentially with $n$, Levy's Lemma forces the gradient function to massively "concentrate" around its mean (zero). The probability of obtaining a gradient that deviates from zero by a measurable amount $\epsilon$ becomes exponentially small.
+
+\textbf{Intractability on Physical Hardware:}
+The ultimate consequence of this exponential variance decay is computational intractability. For a classical optimizer to determine a reliable descent direction, the variance of the gradient must stand out against the inherent statistical noise of quantum measurements (shot noise). Estimating a gradient with a variance of $\mathcal{O}(1/b^n)$ to a precision greater than the statistical noise requires an exponential number of hardware measurements, scaling as $\mathcal{O}(b^n)$.
+
+\subsection{Optimization Landscapes and Geometric Properties}
+
+To successfully navigate and mitigate Barren Plateaus, it is crucial to understand the geometry of the quantum parameter space and the conditions required for convergence.
+
+\textbf{The Fubini-Study Metric:}
+Standard gradient descent erroneously assumes that the parameter space is Euclidean. However, the natural Riemannian metric defined on the complex projective space (the Hilbert space of quantum states) is the \textbf{Fubini-Study Metric}. It measures the infinitesimal geometric distance between two pure quantum states $|\psi(\boldsymbol{\theta})\rangle$ and $|\psi(\boldsymbol{\theta} + d\boldsymbol{\theta})\rangle$, ignoring the global phase. Its differential formula is:
+\begin{equation}
+ds^2 = 1 - |\langle \psi(\boldsymbol{\theta}) | \psi(\boldsymbol{\theta} + d\boldsymbol{\theta}) \rangle|^2
+\end{equation}
+From this metric, the Quantum Geometric Tensor (QGT) is derived. This metric is the core of the Quantum Natural Gradient (QNG) mitigation method. By replacing the Euclidean metric with the QGT, the optimization algorithm adjusts to the actual curvature of the quantum state space, correcting parameter updates and evading sub-optimal convergence regions (provided the circuit is not already in a deep plateau where the tensor itself decays).
+
+\textbf{The Polyak-Łojasiewicz (PL) Condition:}
+The \textbf{PL Condition} is an inequality in non-convex optimization that guarantees the linear convergence of gradient descent toward a global minimum. A cost function $C(\boldsymbol{\theta})$ satisfies the PL condition if there exists a constant $\mu > 0$ such that the squared norm of the gradient is lower-bounded by the difference between the current cost and the global minimum $C^*$:
+\begin{equation}
+\frac{1}{2} \|\nabla C(\boldsymbol{\theta})\|^2 \ge \mu (C(\boldsymbol{\theta}) - C^*)
+\end{equation}
+Barren Plateaus fundamentally violate this condition, as $\|\nabla C(\boldsymbol{\theta})\|^2$ approaches zero while the error $(C(\boldsymbol{\theta}) - C^*)$ remains large. Recent mitigation strategies based on smart initializations (such as Tensor Networks or AI-driven pre-training) justify their success by demonstrating that their pre-training phase places the circuit in a localized region of the parameter space where the PL condition (or local variations of it) is satisfied, theoretically guaranteeing successful optimization.
+
+\section{The Trainability Threshold: Polynomial vs. Exponential Scaling}
+
+While classical machine learning strives for, and achieves, a constant gradient variance $\mathcal{O}(1)$ regardless of network depth, quantum machine learning faces a fundamental mathematical boundary. A constant variance in a quantum circuit mathematically implies that the partial derivatives are completely decoupled from the overall system size $n$.
+
+For this decoupling to occur, the circuit must lack significant entanglement. If the qubits do not interact deeply, the global state remains separable, meaning the multi-qubit wavefunction can be factored into a simple tensor product of single-qubit states. A quantum system with zero or strictly limited entanglement can be perfectly and efficiently simulated on a classical computer in polynomial time using tensor network methods. Therefore, forcing a parameterized quantum circuit to maintain an $\mathcal{O}(1)$ variance structurally eliminates the quantum advantage. To solve classically intractable problems, the Ansatz must generate complex, highly entangled states to explore the exponentially large Hilbert space. This entanglement inherently correlates the qubits, making the objective function and its gradients strictly dependent on the system's dimensionality.
+
+Consequently, the theoretical optimum for a useful Quantum Neural Network is to mitigate the exponential decay to a polynomial scale $\mathcal{O}(1/\text{poly}(n))$. This specific scaling provides the necessary mathematical equilibrium: it allows sufficient entanglement to surpass classical computational capabilities while keeping the gradient variance large enough to be resolved by a physical QPU without requiring an exponential number of hardware measurements.
+
+\chapter{Measures for mitigating BPs}
+
+The vanishing gradient problem can be systematically attacked from 3 different fronts: Topology/architecture, initialization and training dynamic. Each of these categories groups different measures that are based on different theoretical concepts, and thus, they can be mixed together to create stronger ones. Next, I will evaluate some of them.
+
+\section{Topology and Architecture}
+
+This category groups all the options that change the Hilbert Space that the circuit can explore. The objective of this solution is to prevent the system to reach the infamous 2-design circuit's properties, that basically mean that the variance of the parameters decay exponentially with the degree of the circuit, thus ending up with vanishing gradients. 
+
+\subsection{Cost Function (Global vs Local)}
+
+The observable cannot be chosen arbitrarily simply to improve the gradient variance, because the observable is the direct mathematical translation of the problem to be solved. Refactoring a global observable into a local one is an active field of study today.
+
+It is advisable to use a local observable instead of a global one, but this is not always possible. Mathematically, this is based on the linearity property of the expected value. If the global observable $H$ can be expressed as a sum of local terms $H = \sum_i H_i$, then the cost function can be reformulated as:
+
+\begin{equation}
+C(\theta) = \langle \psi(\theta)|H|\psi(\theta)\rangle = \sum_i \langle \psi(\theta)|H_i|\psi(\theta)\rangle
+\end{equation}
+
+However, not all problems allow this decomposition, and in some cases, the structure of the problem requires a global observable to capture the complex interactions between qubits.
+
+\subsection{Problem-based Ansatze}
+
+Generic, hardware-efficient architectures (like \texttt{EfficientSU2}) are problem-agnostic and parameterize operations across all available degrees of freedom, which inherently leads to the uniform exploration characteristic of a 2-design. Problem-based Ansatze restructure the circuit by embedding the mathematical symmetries of the specific problem directly into the quantum gates.
+
+A prime example is the Hamiltonian Variational Ansatz (HVA) or Equivariant Quantum Neural Networks. Instead of allowing arbitrary rotations, the parameterized gates are strictly constructed from the terms of the target Hamiltonian. This restricts the Dynamic Lie Algebra (DLA) of the circuit to a polynomially sized subspace. By confining the exploration to this specific symmetric subspace, the circuit is physically incapable of reaching a unitary 2-design, thereby avoiding the exponential concentration of measure regardless of the circuit's depth.
+
+\section{Initialization}
+
+This group assumes that the architecture can have BPs, and thus tries to avoid them from step 0 of the algorithm. Standard classical machine learning relies on randomly initializing the parameter vector $\theta_0$ from a uniform distribution, such as $[-\pi, \pi]$. In a highly expressive quantum circuit, this practice immediately maps the initial quantum state to the Haar measure.
+
+Because the concentration of measure guarantees that the vast majority of the parameter space consists of flat regions where $\partial_{\theta_i} C \approx 0$, a random uniform initialization has a probability exponentially close to $1$ of placing the starting point exactly inside a Barren Plateau. Consequently, the initial gradient vector evaluated by the classical optimizer consists entirely of statistical noise, paralyzing the algorithm before the first update can occur.
+
+\subsection{Identity Initialization}
+
+Identity initialization addresses the random starting problem by structuring the initial parameter vector $\theta_0$ such that the unitary operations of sequential blocks precisely cancel each other out. At step zero, the global effect of the parameterized circuit resolves to the Identity operator $U(\theta_0) = I$.
+
+Because the effective depth of the circuit at step zero is physically zero, the system has no entanglement and does not form a 2-design, guaranteeing a large, mathematically precise initial gradient. As the classical optimizer iteratively updates the parameters, they slowly diverge from zero. The circuit progressively acquires depth and entanglement, exploring the cost function while remaining guided by valid gradient signals during the critical early phases of the optimization.
+
+\subsection{Warm Starting}
+
+Warm starting bypasses the flat regions of the Hilbert space by leveraging classical computational methods to compute a highly informed initial parameter vector $\theta_0$. Instead of starting blindly, the algorithm utilizes classical approximations, such as Tensor Network simulations (e.g., Matrix Product States) or approximate classical heuristics, to solve a simplified version of the problem.
+
+The classical output is then mapped onto the quantum parameters. This ensures that the quantum optimization begins inside the convergence basin (the localized region with steep gradients) of the global minimum. The quantum hardware is therefore only required to perform the final, classically intractable fine-tuning of the state, entirely circumventing the untrainable flat regions of the global parameter space.
+
+\section{Training Dynamic}
+
+This category groups the strategies that modify the form in which the classical optimizer interacts with the circuit through time, assuming the architecture and the initialization are already established.
+
+\subsection{Changes on the Optimizer}
+
+When executing VQAs on physical hardware, the calculated gradients are not exact mathematical derivatives but statistical estimates corrupted by shot noise. Standard optimizers like COBYLA or basic Gradient Descent fail catastrophically when the gradient variance approaches the noise floor, as they mistake stochastic fluctuations for valid topological slopes.
+
+Changing the optimizer to stochastic-specific algorithms, such as Simultaneous Perturbation Stochastic Approximation (SPSA) or its quantum geometric variant (QNSPSA), mathematically accounts for this noise. These optimizers evaluate the objective function using random perturbation vectors across all parameters simultaneously. This approach inherently averages out the statistical noise and maintains an operationally valid descent trajectory, even when the underlying gradient variance is highly suppressed by the hardware limitations.
+
+\chapter{My Investigation}
+
+\section{Comparison on Normal vs Enhanced Circuits for BP Mitigation}
+
+Before comparing the optimizers, I wanted to do a couple of tests of normal circuits vs circuits created with the mitigation of BPs in mind. 
+
+\subsection{Initialization Comparison}
+
+I designed this experiment as an initialization-level comparison, not as a full training run. For each qubit count ($n \in \{2,4,6,8,10,12,14\}$), I instantiate two circuit regimes: a worst-case setup with full entanglement, fixed depth ($L=3$), and a global cost ($Z^{\otimes n}$), and a mitigated setup with linear entanglement, depth ($L \approx \log_2(n)$), and a local cost on a single qubit.
+
+For each regime and each $n$, I run a Monte Carlo test at $t=0$: I sample 150 random parameter vectors, estimate one gradient component ($\partial_{\theta_0}C$) using the parameter-shift rule, and compute its variance. In the worst-case branch I initialize parameters uniformly in $[-\pi,\pi]$, while in the mitigated branch I use a narrow Gaussian centered at 0 to stay near identity initialization. I then compare how the gradient variance scales with $n$ to evaluate how quickly gradients vanish in each regime.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/thopo-ini-miti.png}
+    \caption{Gradient variance scaling at initialization.}\label{fig:initialization}
+\end{figure}
+
+The figure shows a clear result. The circuit in red followed an exponential decay (the column axis is logarithmical) while the circuit in blue shows that for the first iteration, the chosen BP mitigation approaches worked nicely, not showing any decay with the increase in qubits.
+
+\subsection{8-qubit Training Comparison}
+
+In the next experiment, I move from the initialization-only test to a short optimization dynamics test at fixed size ($n=8$). I keep the same two circuit families to make the comparison consistent.
+
+I then train both models with the same Gradient Descent loop using exact parameter-shift gradients for all parameters at each iteration. I use identical optimization settings for both branches (learning rate $0.5$, maximum $60$ iterations, early stopping tolerance $10^{-4}$), and I track two temporal metrics: the cost trajectory $C(\theta_t)$ and the gradient norm $\|\nabla C\|_2$. This lets me compare not only where each model converges, but also how stable and informative the gradient signal remains during training.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/training.png}
+    \caption{Training dynamics: Cost trajectory and gradient norm at 8 qubits.}\label{fig:training}
+\end{figure}
+
+We can see that for the optimized circuit, thanks to the initialization, the algorithm converges much faster and smoother, in comparison with the non-optimized one. We can also see on the right figure, on the red curve, that the gradient almost falls to 0 before converging, almost reaching a 2-design.
+
+\section{Execution Environment and Design Decisions}
+\label{sec:execution-environment}
+
+The optimizer comparison experiments (Phase~2) require running hundreds of independent training jobs across multiple circuit architectures, random seeds, and system sizes. Rather than launching these runs manually, the workflow was designed around three principles: (i) separate \emph{execution scenarios} that progressively add physical realism, (ii) a \emph{university cluster} for orchestration and reproducibility, and (iii) a \emph{shared experimental contract} so that ideal, shot-noise, and real-hardware runs remain comparable.
+
+\subsection{University Cluster and Job Orchestration}
+
+All large-scale grids are submitted to the university's Slurm-managed HPC cluster. Each experiment is launched as a \textbf{job array}: one Slurm task corresponds to one $(\text{seed},\, n_{\text{qubits}})$ point for a given architecture and scenario. Array tasks are mapped in \emph{qubit-major} order (all seeds for $q=4$, then all seeds for $q=8$, and so on), which makes partial failures easy to identify and relaunch.
+
+Simulation workloads (ideal and shot-noise) run on the \texttt{CPU} partition with modest memory (4\,GiB per CPU core). Real-hardware orchestration jobs use the \texttt{CPU-LARGE} partition with a longer wall-time limit (up to seven days), because a single Slurm task may remain blocked waiting on IBM Quantum queue times even though the actual quantum computation does not execute on the cluster nodes.
+
+Python dependencies are executed inside a project-specific environment via \texttt{bnd run}, which keeps package versions fixed across login nodes and compute nodes. Credentials for IBM Quantum (\texttt{QISKIT\_IBM\_TOKEN}, instance/CRN) are loaded from a local \texttt{.env} file only on real-hardware tasks.
+
+Each array job writes results under a timestamped root folder:
+\begin{center}
+\texttt{outputs/<timestamp>\_phase2\_<scenario>\_<architecture>/seed\_<s>/qubits\_<q>/}
+\end{center}
+A small metadata lock file (\texttt{outputs/.runmeta/<job\_id>/run\_name.txt}) guarantees that all tasks in the same array share one run root. Completed points store \texttt{optimizer\_history.npz}, convergence plots, and (for hardware) a \texttt{run\_status.json} marker so that relaunches can skip finished work.
+
+\subsection{Three Execution Scenarios}
+
+Phase~2 repeats the same optimizer comparison---\textbf{COBYLA} versus \textbf{QNSPSA}---under three increasingly realistic estimators. The circuit, observable, seeds, and optimizers are identical; only the cost-function evaluator changes.
+
+\paragraph{Ideal simulation (statevector).}
+The objective $C(\theta)=\langle Z_{\text{readout}}\rangle$ is evaluated with Qiskit's \texttt{StatevectorEstimator}. Gradients are exact up to floating-point precision; there is no measurement noise. This scenario establishes an upper bound on trainability and isolates optimizer behaviour from sampling statistics. It is the cheapest scenario per evaluation and is used to detect whether an architecture or optimizer fails even in the absence of noise.
+
+\paragraph{Shot-noise simulation (Monte Carlo).}
+The same circuits are evaluated with a Monte Carlo shot-noise model (\texttt{exp-shot-noise.py}). Each objective call returns a \emph{stochastic} estimate whose variance is controlled by a target precision parameter (default $0.1$). This intermediate scenario mimics the finite-shot statistics of a QPU without queue latency or calibration drift, and tests whether conclusions drawn in the ideal setting survive under realistic gradient noise---the regime where optimizers such as QNSPSA are expected to be advantageous.
+
+\paragraph{Real IBM Quantum hardware.}
+The estimator is Qiskit IBM Runtime's \texttt{Estimator}, targeting the \texttt{ibm\_basquecountry} backend (IBM Quantum Heron processor). Each objective evaluation submits work to IBM's queue; Slurm tasks therefore spend most of their wall time waiting for remote results. Hardware runs use 1024 shots per evaluation by default. IBM Runtime containers are opened in \textbf{batch} mode (one batch per Slurm task and $(\text{seed}, q)$ point), which groups many estimator jobs while preserving queue priority relative to single-job submission. Client-side \texttt{result()} timeouts are disabled so that long queue waits do not abort valid jobs prematurely.
+
+Table~\ref{tab:execution-scenarios} summarises the main differences. All scenarios share five random seeds $\{10,20,30,40,50\}$ and three architectures: a hardware-efficient baseline (\texttt{baseline\_hea}), a quantum convolutional design (\texttt{qcnn}), and a residual quantum network (\texttt{resqnet}).
+
+\begin{table}[h!]
+\centering
+\caption{Phase~2 execution scenarios and their role in the experimental pipeline.}
+\label{tab:execution-scenarios}
+\begin{tabular}{lccc}
+\hline
+\textbf{Aspect} & \textbf{Ideal} & \textbf{Shot-noise} & \textbf{Real hardware} \\
+\hline
+Estimator & Statevector & Monte Carlo shots & IBM Runtime \\
+Noise / latency & None & Statistical only & Device + queue \\
+Slurm partition & \texttt{CPU} & \texttt{CPU} & \texttt{CPU-LARGE} \\
+Typical bottleneck & CPU time & CPU time & IBM queue \\
+Budget rule & $k \times p$, $k{=}37.5$ & $k \times p$, $k{=}37.5$ & $k \times p$, $k{=}20$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Grid Coverage and Fair Compute Budgeting}
+
+Qubit grids depend on architectural constraints. The baseline ansatz is evaluated at $n \in \{4,8,12,16,20\}$. Structured architectures (\texttt{qcnn}, \texttt{resqnet}) require qubit counts that are powers of two and are evaluated at $n \in \{4,8,16\}$ in the reported Phase~2 grids (hardware runs at $n{=}32$ were excluded after pilot tests showed excessive wall-time and memory pressure).
+
+To keep optimizer comparisons fair across circuit sizes, the evaluation budget scales with the number of trainable parameters $p$:
+\begin{equation}
+\text{budget\_evals} = \mathrm{round}(k \cdot p),
+\end{equation}
+where $p$ is the ansatz parameter count (which differs across architectures even at the same $n$). Simulation scenarios use $k=37.5$; real hardware uses a smaller $k=20$ to balance statistical fairness against IBM time limits. Early stopping is disabled in these grids so that termination is governed solely by the shared budget cap. For QNSPSA, part of the budget is consumed by fidelity evaluations, so both optimizers receive the same nominal \texttt{budget\_evals} but QNSPSA performs fewer objective calls---an asymmetry noted when interpreting results.
+
+Together, these design choices define a reproducible experimental pipeline: the cluster schedules and names runs, the three scenarios probe ideal, noisy, and physical regimes in a controlled order, and the dynamic budget ties computational cost to model complexity so that larger circuits are not compared under an artificially fixed iteration cap.
+
+\section{COBYLA vs QNSPSA}
+
+\section{Results Analysis}
+
+\addappheadtotoc
+\appendix
+
+\chapter{Declaration of use of generative AI} \label{ch:declaration}
+\input chapters/appendix/declaration
+
+\bibliographystyle{unsrt}
+\bibliography{erreferentziak}
+
+\end{document}
+

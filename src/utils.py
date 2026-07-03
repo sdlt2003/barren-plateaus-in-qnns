@@ -66,10 +66,10 @@ def resolve_runtime_outdir(outdir: str, *, project_root: Path | None = None) -> 
 class RunSummary:
     seed: int
     qubits: int
-    cobyla_final_cost: float
-    qnspsa_final_cost: float
-    cobyla_evals: int
-    qnspsa_evals: int
+    cobyla_final_cost: float | None
+    qnspsa_final_cost: float | None
+    cobyla_evals: int | None
+    qnspsa_evals: int | None
 
 
 def resolve_budget_evals(
@@ -119,44 +119,74 @@ def find_optimizer_history_files(run_root: str) -> List[str]:
     """Return list of optimizer_history.npz files under run_root (recursive)."""
     flat_pattern = os.path.join(run_root, "**", "seed_*_qubits_*", "optimizer_history.npz")
     nested_pattern = os.path.join(run_root, "**", "seed_*", "qubits_*", "optimizer_history.npz")
-    files = sorted(set(glob.glob(flat_pattern, recursive=True)) | set(glob.glob(nested_pattern, recursive=True)))
+    nested_opt_pattern = os.path.join(run_root, "**", "seed_*", "qubits_*", "opt_*", "optimizer_history.npz")
+    files = sorted(
+        set(glob.glob(flat_pattern, recursive=True))
+        | set(glob.glob(nested_pattern, recursive=True))
+        | set(glob.glob(nested_opt_pattern, recursive=True))
+    )
     return files
 
 
 def parse_single_run(npz_path: str) -> RunSummary:
-    run_dir = os.path.basename(os.path.dirname(npz_path))
-    flat_match = FLAT_RUN_DIR_RE.match(run_dir)
-
+    # Support both layouts:
+    # - flat:   outputs/seed_<SEED>_qubits_<Q>/optimizer_history.npz
+    # - nested: outputs/<run>/seed_<SEED>/qubits_<Q>/optimizer_history.npz
+    # - nested split: outputs/<run>/seed_<SEED>/qubits_<Q>/opt_<OPT>/optimizer_history.npz
+    parent_dir = os.path.basename(os.path.dirname(npz_path))
+    flat_match = FLAT_RUN_DIR_RE.match(parent_dir)
     if flat_match:
         seed = int(flat_match.group("seed"))
         qubits = int(flat_match.group("qubits"))
     else:
-        qubits_match = QUBITS_DIR_RE.match(run_dir)
-        seed_dir = os.path.basename(os.path.dirname(os.path.dirname(npz_path)))
-        seed_match = SEED_DIR_RE.match(seed_dir)
-
-        if not (seed_match and qubits_match):
-            raise ValueError(f"Unexpected run directory name: {os.path.dirname(npz_path)}")
-
-        seed = int(seed_match.group("seed"))
-        qubits = int(qubits_match.group("qubits"))
+        seed = None
+        qubits = None
+        for ancestor in Path(npz_path).parents:
+            name = ancestor.name
+            if qubits is None:
+                qm = QUBITS_DIR_RE.match(name)
+                if qm:
+                    qubits = int(qm.group("qubits"))
+            if seed is None:
+                sm = SEED_DIR_RE.match(name)
+                if sm:
+                    seed = int(sm.group("seed"))
+            if seed is not None and qubits is not None:
+                break
+        if seed is None or qubits is None:
+            raise ValueError(f"Unexpected optimizer_history location: {npz_path}")
 
     payload = np.load(npz_path, allow_pickle=True)
     history = payload["history"].item()
 
-    cobyla_cost = history["cobyla"]["cost"]
-    qnspsa_cost = history["qnspsa"]["cost"]
+    cobyla_cost = history.get("cobyla", {}).get("cost", [])
+    qnspsa_cost = history.get("qnspsa", {}).get("cost", [])
 
-    if not cobyla_cost or not qnspsa_cost:
+    def _final_cost_and_evals(cost_series) -> tuple[float | None, int | None]:
+        try:
+            n = len(cost_series)
+        except Exception:
+            n = 0
+        if n <= 0:
+            return None, None
+        try:
+            return float(cost_series[-1]), int(n)
+        except Exception:
+            return None, int(n)
+
+    cobyla_final, cobyla_evals = _final_cost_and_evals(cobyla_cost)
+    qnspsa_final, qnspsa_evals = _final_cost_and_evals(qnspsa_cost)
+
+    if cobyla_final is None and qnspsa_final is None:
         raise ValueError(f"Empty cost history found in {npz_path}")
 
     return RunSummary(
         seed=seed,
         qubits=qubits,
-        cobyla_final_cost=float(cobyla_cost[-1]),
-        qnspsa_final_cost=float(qnspsa_cost[-1]),
-        cobyla_evals=len(cobyla_cost),
-        qnspsa_evals=len(qnspsa_cost),
+        cobyla_final_cost=cobyla_final,
+        qnspsa_final_cost=qnspsa_final,
+        cobyla_evals=cobyla_evals,
+        qnspsa_evals=qnspsa_evals,
     )
 
 
@@ -175,15 +205,24 @@ def write_per_run_csv(rows: List[RunSummary], csv_path: str) -> None:
             ]
         )
         for row in sorted(rows, key=lambda r: (r.qubits, r.seed)):
-            best = "cobyla" if row.cobyla_final_cost < row.qnspsa_final_cost else "qnspsa"
+            c = row.cobyla_final_cost
+            q = row.qnspsa_final_cost
+            if c is None and q is None:
+                best = "n/a"
+            elif c is None:
+                best = "qnspsa"
+            elif q is None:
+                best = "cobyla"
+            else:
+                best = "cobyla" if c < q else "qnspsa"
             writer.writerow(
                 [
                     row.seed,
                     row.qubits,
-                    row.cobyla_final_cost,
-                    row.qnspsa_final_cost,
-                    row.cobyla_evals,
-                    row.qnspsa_evals,
+                    "" if row.cobyla_final_cost is None else row.cobyla_final_cost,
+                    "" if row.qnspsa_final_cost is None else row.qnspsa_final_cost,
+                    "" if row.cobyla_evals is None else row.cobyla_evals,
+                    "" if row.qnspsa_evals is None else row.qnspsa_evals,
                     best,
                 ]
             )
@@ -196,22 +235,23 @@ def aggregate_rows(rows: List[RunSummary]) -> Dict[int, Dict[str, float]]:
 
     agg: Dict[int, Dict[str, float]] = {}
     for q, grp in by_qubits.items():
-        c_final = np.array([r.cobyla_final_cost for r in grp], dtype=float)
-        q_final = np.array([r.qnspsa_final_cost for r in grp], dtype=float)
-        c_eval = np.array([r.cobyla_evals for r in grp], dtype=float)
-        q_eval = np.array([r.qnspsa_evals for r in grp], dtype=float)
+        c_final = np.array([np.nan if r.cobyla_final_cost is None else float(r.cobyla_final_cost) for r in grp], dtype=float)
+        q_final = np.array([np.nan if r.qnspsa_final_cost is None else float(r.qnspsa_final_cost) for r in grp], dtype=float)
+        c_eval = np.array([np.nan if r.cobyla_evals is None else float(r.cobyla_evals) for r in grp], dtype=float)
+        q_eval = np.array([np.nan if r.qnspsa_evals is None else float(r.qnspsa_evals) for r in grp], dtype=float)
 
-        qnspsa_wins = int(np.sum(q_final < c_final))
-        cobyla_wins = int(np.sum(c_final < q_final))
+        paired = np.isfinite(c_final) & np.isfinite(q_final)
+        qnspsa_wins = int(np.sum(q_final[paired] < c_final[paired]))
+        cobyla_wins = int(np.sum(c_final[paired] < q_final[paired]))
 
         agg[q] = {
             "n_runs": len(grp),
-            "cobyla_final_mean": float(np.mean(c_final)),
-            "cobyla_final_std": float(np.std(c_final)),
-            "qnspsa_final_mean": float(np.mean(q_final)),
-            "qnspsa_final_std": float(np.std(q_final)),
-            "cobyla_evals_mean": float(np.mean(c_eval)),
-            "qnspsa_evals_mean": float(np.mean(q_eval)),
+            "cobyla_final_mean": float(np.nanmean(c_final)),
+            "cobyla_final_std": float(np.nanstd(c_final)),
+            "qnspsa_final_mean": float(np.nanmean(q_final)),
+            "qnspsa_final_std": float(np.nanstd(q_final)),
+            "cobyla_evals_mean": float(np.nanmean(c_eval)),
+            "qnspsa_evals_mean": float(np.nanmean(q_eval)),
             "qnspsa_wins": qnspsa_wins,
             "cobyla_wins": cobyla_wins,
         }
@@ -404,8 +444,12 @@ def save_final_cost_boxplot(rows: list, agg: dict, outdir: str) -> list[str]:
     qnspsa_samples = []
     for q in qubits:
         by_qubit = [row for row in rows if row.qubits == q]
-        cobyla_samples.append([row.cobyla_final_cost for row in by_qubit])
-        qnspsa_samples.append([row.qnspsa_final_cost for row in by_qubit])
+        cobyla_samples.append(
+            [row.cobyla_final_cost for row in by_qubit if row.cobyla_final_cost is not None]
+        )
+        qnspsa_samples.append(
+            [row.qnspsa_final_cost for row in by_qubit if row.qnspsa_final_cost is not None]
+        )
 
     positions = np.arange(len(qubits), dtype=float)
     box_width = 0.32

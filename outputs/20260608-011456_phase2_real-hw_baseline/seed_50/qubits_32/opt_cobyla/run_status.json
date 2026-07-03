@@ -1,0 +1,9 @@
+{
+  "architecture": "baseline_hea",
+  "backend": "ibm_basquecountry",
+  "error": "RuntimeJobFailureError('Unable to retrieve job result. Error code 1217; Session has been closed')",
+  "execution_mode": "batch",
+  "optimizer": "cobyla",
+  "runtime_result_timeout_s": null,
+  "status": "failed_runtime"
+}
