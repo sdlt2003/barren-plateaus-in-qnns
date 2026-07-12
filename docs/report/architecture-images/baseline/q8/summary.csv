@@ -1,0 +1,2 @@
+architecture,n_qubits,num_params,depth,size,readout_qubit,png_generated,text_diagram,png_diagram
+baseline,8,64,19,85,7,yes,baseline/q8/diagram.txt,baseline/q8/diagram.png

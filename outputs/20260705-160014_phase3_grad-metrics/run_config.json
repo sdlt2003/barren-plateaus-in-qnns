@@ -1,0 +1,42 @@
+{
+  "architectures": [
+    "baseline",
+    "qcnn",
+    "resqnet"
+  ],
+  "qubit_sizes": [
+    4,
+    8,
+    12,
+    16
+  ],
+  "n_samples": 300,
+  "grad_index": 0,
+  "init_dist": "uniform",
+  "init_scale": 0.1,
+  "norm_sizes": [
+    4,
+    8,
+    12,
+    16
+  ],
+  "norm_seeds": [
+    10,
+    20,
+    30,
+    40,
+    50
+  ],
+  "norm_optimizers": "cobyla,qnspsa,nft",
+  "norm_budget_override": null,
+  "norm_budget_k": 37.5,
+  "norm_stride": 10,
+  "norm_max_points": null,
+  "noise_modes": [
+    "ideal",
+    "shot-noise"
+  ],
+  "target_precision": 0.1,
+  "grad_method": "auto",
+  "seed": 10
+}

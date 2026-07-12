@@ -1,7 +1,0 @@
-qiskit
-qiskit-algorithms
-qiskit-ibm-runtime
-qiskit-aer
-matplotlib
-pylatexenc
-ipykernel

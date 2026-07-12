@@ -5,10 +5,6 @@ pull their *default* values from a single place so runs stay consistent and are
 easy to update.
 """
 
-# Shared defaults
-EARLY_STOPPING_TOLERANCE = 1e-3
-EARLY_STOPPING_WINDOW = 200
-
 # Dynamic budgeting
 #
 # In many papers, a fair compute budget scales with the number of parameters p
@@ -17,29 +13,35 @@ EARLY_STOPPING_WINDOW = 200
 # Empirical range suggested: k in [50, 100].
 DEFAULT_BUDGET_K = 37.5
 
-MIN_BUDGET_EVALS = 1
-
 # Shared defaults for simulation scenarios (ideal + shot-noise)
 SIM_DEFAULT_BUDGET_K = DEFAULT_BUDGET_K
-SIM_EARLY_STOPPING_WINDOW = EARLY_STOPPING_WINDOW
 SIM_MAX_BUDGET_EVALS = None
 
 # Shot-noise / Monte Carlo specific
 SHOT_NOISE_DEFAULT_TARGET_PRECISION = 0.1
 
+# Inline gradient checkpoints during simulation training (--track-grad-* in exp-ideal/shot-noise).
+SIM_GRAD_CHECKPOINT_STRIDE = 10
+
 # Real hardware (IBM Runtime)
-# Dynamic default: budget_evals = round(k * num_params), same rule as simulation.
 REAL_HW_DEFAULT_BUDGET_K = 20
-# Legacy fixed profile (only if budget mode is switched to "fixed" in exp-real.py).
-REAL_HW_FIXED_BUDGET_BASE = 32
 REAL_HW_MAX_BUDGET_EVALS = None
-REAL_HW_EARLY_STOPPING_WINDOW = 30
 REAL_HW_DEFAULT_SHOTS = 1024
-# IBM docs: wait for job.result() without a client-side timeout unless debugging.
+REAL_HW_MAX_SHOTS = None
+
+# None = wait for job.result() without a client-side timeout (IBM-recommended on HW).
 REAL_HW_RUNTIME_RESULT_TIMEOUT = None
-# Default IBM Runtime container for real-hw grids: one Batch per (seed, q) Slurm task.
-REAL_HW_EXECUTION_MODE = "batch"  # session | batch | job
-# None = do not pass max_time to Session()/Batch(); IBM uses the plan default (often ~8h Premium).
+
+# IBM Runtime container for Estimator(mode=...). Options:
+#   batch   - jobs grouped in a Batch; good queue priority for many independent
+#             grid points (default for Slurm: one Batch per seed x qubits task).
+#   session - reserved QPU access for the container TTL; useful when chaining
+#             many estimator calls on the same backend in one process.
+#   job     - no container; each estimator.run is a standalone job (simplest,
+#             but typically slower queueing for large grids).
+REAL_HW_EXECUTION_MODE = "batch"  # batch | session | job
+
+# Optional TTL for session/batch (e.g. "8h"). None = IBM plan default.
 REAL_HW_RUNTIME_MAX_TIME = None
-# Backward-compatible alias used by older CLI/env names.
+# Backward-compatible alias for older CLI/env names (--session-max-time).
 REAL_HW_SESSION_MAX_TIME = REAL_HW_RUNTIME_MAX_TIME
