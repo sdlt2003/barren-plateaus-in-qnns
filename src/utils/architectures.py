@@ -12,9 +12,9 @@ from qiskit.circuit import ParameterVector
 from qiskit.circuit.library import efficient_su2
 
 
-BASELINE = "baseline"
-QCNN = "qcnn"
-RESQNET = "resqnet"
+BASELINE    = "baseline"
+QCNN        = "qcnn"
+RESQNET     = "resqnet"
 
 # Deprecated CLI / legacy JSON alias (maps to BASELINE in build_architecture).
 _BASELINE_LEGACY_ALIASES = frozenset({"baseline_hea"})
